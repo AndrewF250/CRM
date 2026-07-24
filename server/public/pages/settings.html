@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <div id="app"></div>
+
+    <script src="/assets/js/api.js"></script>
+    <script src="/assets/js/app.js"></script>
+    <script>
+    (async function() {
+        if (!API.requireAuth()) return;
+        
+        const user = API.getCurrentUser();
+        const app = document.getElementById('app');
+        
+        app.innerHTML = renderSidebar('settings') + renderHeader() + `
+            <div class="page-header"><div><h1 class="page-title">Настройки</h1></div></div>
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="tabProfile">Профиль</button>
+                <button class="tab-btn" data-tab="tabTeam">Команда</button>
+            </div>
+            <div class="tab-content active" id="tabProfile">
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-header"><h3 class="card-title">Личные данные</h3></div>
+                        <div class="card-body">
+                            <div class="form-group"><label class="form-label">Имя</label><input type="text" class="form-input" value="${user?.name || ''}" readonly></div>
+                            <div class="form-group"><label class="form-label">Логин</label><input type="text" class="form-input" value="${user?.username || ''}" readonly></div>
+                            <div class="form-group"><label class="form-label">Роль</label><input type="text" class="form-input" value="Администратор" readonly></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3 class="card-title">Безопасность</h3></div>
+                        <div class="card-body">
+                            <p class="text-muted" style="margin-bottom:16px;">Для смены пароля обратитесь к администратору системы.</p>
+                            <button class="btn btn-danger" onclick="API.logout()">Выйти из аккаунта</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-content" id="tabTeam">
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Команда</h3></div>
+                    <div class="card-body">
+                        <div class="table-wrapper">
+                            <table class="table">
+                                <thead><tr><th>Пользователь</th><th>Логин</th><th>Роль</th></tr></thead>
+                                <tbody>
+                                    <tr><td><div style="display:flex;align-items:center;gap:10px;"><div class="user-avatar" style="width:30px;height:30px;font-size:0.65rem;">КИ</div><span class="table-cell-name">Костя</span></div></td><td>Костя</td><td><span class="badge badge-primary">Админ</span></td></tr>
+                                    <tr><td><div style="display:flex;align-items:center;gap:10px;"><div class="user-avatar" style="width:30px;height:30px;font-size:0.65rem;background:var(--success);">МИ</div><span class="table-cell-name">Максим</span></div></td><td>Максим</td><td><span class="badge badge-primary">Админ</span></td></tr>
+                                    <tr><td><div style="display:flex;align-items:center;gap:10px;"><div class="user-avatar" style="width:30px;height:30px;font-size:0.65rem;background:var(--warning);">АН</div><span class="table-cell-name">Андрей</span></div></td><td>Андрей</td><td><span class="badge badge-primary">Админ</span></td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div></div></div>
+        `;
+        
+        initCommonUI();
+    })();
+    </script>
+</body>
+</html>

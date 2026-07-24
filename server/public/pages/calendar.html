@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Календарь — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <div id="app"></div>
+
+    <script src="/assets/js/api.js?v=3"></script>
+    <script src="/assets/js/app.js?v=3"></script>
+    <script src="/assets/js/crm-data.js?v=3"></script>
+    <script>
+    (async function() {
+        if (!API.requireAuth()) return;
+        
+        const app = document.getElementById('app');
+        app.innerHTML = renderSidebar('calendar') + renderHeader() + `
+            <div class="page-header">
+                <div><h1 class="page-title">Календарь</h1><p class="page-subtitle">Задачи и дедлайны</p></div>
+                <div class="page-actions">
+                    <div class="cal-nav">
+                        <button class="btn btn-secondary btn-sm" onclick="calPrev()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg></button>
+                        <span class="cal-month-label" id="calMonthLabel"></span>
+                        <button class="btn btn-secondary btn-sm" onclick="calNext()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></button>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="calToday()">Сегодня</button>
+                </div>
+            </div>
+            <div class="filter-bar" style="margin-bottom:16px;">
+                <span class="text-sm text-muted" style="margin-right:4px;">Ответственный:</span>
+                <button class="filter-chip active" onclick="filterPerson('all', this)">Все</button>
+                <button class="filter-chip" onclick="filterPerson('Костя', this)">Костя</button>
+                <button class="filter-chip" onclick="filterPerson('Максим', this)">Максим</button>
+                <button class="filter-chip" onclick="filterPerson('Андрей', this)">Андрей</button>
+            </div>
+            <div class="card">
+                <div class="cal-grid" id="calGrid">
+                    <div class="cal-day-header">Пн</div>
+                    <div class="cal-day-header">Вт</div>
+                    <div class="cal-day-header">Ср</div>
+                    <div class="cal-day-header">Чт</div>
+                    <div class="cal-day-header">Пт</div>
+                    <div class="cal-day-header cal-weekend-header">Сб</div>
+                    <div class="cal-day-header cal-weekend-header">Вс</div>
+                </div>
+            </div>
+            <div class="cal-legend" style="margin-top:16px;">
+                <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--danger);"></span> Просрочено</div>
+                <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--success);"></span> В работе</div>
+                <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--warning);"></span> Ожидает</div>
+                <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--gray-400);"></span> Выполнено</div>
+            </div>
+            </div></div></div>
+        `;
+        
+        initCommonUI();
+        await CRM.load();
+        
+        const now = new Date();
+        let calYear = now.getFullYear();
+        let calMonth = now.getMonth();
+        let filterPersonValue = 'all';
+        
+        const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+        
+        window.calPrev = function() { calMonth--; if(calMonth<0){calMonth=11;calYear--; } render(); };
+        window.calNext = function() { calMonth++; if(calMonth>11){calMonth=0;calYear++; } render(); };
+        window.calToday = function() { calYear=now.getFullYear(); calMonth=now.getMonth(); render(); };
+        
+        window.filterPerson = function(person, btn) {
+            filterPersonValue = person;
+            document.querySelectorAll('.filter-bar .filter-chip').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            render();
+        };
+        
+        function render() {
+            document.getElementById('calMonthLabel').textContent = MONTHS[calMonth] + ' ' + calYear;
+            const grid = document.getElementById('calGrid');
+            const headers = grid.querySelectorAll('.cal-day-header');
+            grid.innerHTML = '';
+            headers.forEach(h => grid.appendChild(h));
+            
+            const tasks = CRM.getTasks().filter(t => {
+                if (filterPersonValue === 'all') return true;
+                return t.person === filterPersonValue;
+            });
+            
+            const firstDay = new Date(calYear, calMonth, 1).getDay();
+            const firstDayAdj = firstDay === 0 ? 6 : firstDay - 1;
+            const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+            
+            for (let i = 0; i < firstDayAdj; i++) {
+                const empty = document.createElement('div');
+                empty.className = 'cal-day cal-day-empty';
+                grid.appendChild(empty);
+            }
+            
+            for (let d = 1; d <= daysInMonth; d++) {
+                const cell = document.createElement('div');
+                cell.className = 'cal-day';
+                const isToday = d === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear();
+                const dayOfWeek = new Date(calYear, calMonth, d).getDay();
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                
+                if (isToday) cell.classList.add('cal-today');
+                if (isWeekend) cell.classList.add('cal-weekend');
+                
+                const num = document.createElement('div');
+                num.className = 'cal-day-num' + (isToday ? ' cal-today-num' : '');
+                num.textContent = d;
+                cell.appendChild(num);
+                
+                // Find tasks for this day
+                const dayStr = d < 10 ? '0' + d : '' + d;
+                const monthStr = (calMonth + 1) < 10 ? '0' + (calMonth + 1) : '' + (calMonth + 1);
+                
+                const dayTasks = tasks.filter(t => {
+                    if (!t.date) return false;
+                    // Check various date formats
+                    const date = t.date.trim();
+                    if (date.includes(dayStr + '.' + monthStr)) return true;
+                    if (date.includes(dayStr + '/' + monthStr)) return true;
+                    if (isToday && date === 'Сегодня') return true;
+                    if (isToday && date.toLowerCase() === 'сегодня') return true;
+                    return false;
+                });
+                
+                dayTasks.forEach(t => {
+                    const project = CRM.getProject(t.project_id);
+                    const el = document.createElement('div');
+                    el.className = 'cal-event';
+                    
+                    if (t.done) {
+                        el.classList.add('cal-event-gray', 'cal-event-done');
+                    } else if (t.urgent) {
+                        el.classList.add('cal-event-danger');
+                    } else if (t.column_status === 'В работе') {
+                        el.classList.add('cal-event-success');
+                    } else if (t.column_status === 'Согласуем') {
+                        el.classList.add('cal-event-warning');
+                    } else {
+                        el.classList.add('cal-event-info');
+                    }
+                    
+                    el.textContent = (t.time ? t.time + ' ' : '') + t.name;
+                    el.title = t.name + (project ? ' — ' + project.name : '') + ' (' + t.person + ')';
+                    el.style.cursor = 'pointer';
+                    el.onclick = function() {
+                        if (project) {
+                            window.location.href = '/pages/project.html?id=' + t.project_id;
+                        }
+                    };
+                    cell.appendChild(el);
+                });
+                
+                grid.appendChild(cell);
+            }
+            
+            const totalCells = firstDayAdj + daysInMonth;
+            const remainder = totalCells % 7;
+            if (remainder > 0) {
+                for (let j = 0; j < 7 - remainder; j++) {
+                    const empty = document.createElement('div');
+                    empty.className = 'cal-day cal-day-empty';
+                    grid.appendChild(empty);
+                }
+            }
+        }
+        
+        render();
+    })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дашборд — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <div id="app"></div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+
+    <script src="/assets/js/api.js?v=2"></script>
+    <script src="/assets/js/app.js?v=2"></script>
+    <script src="/assets/js/crm-data.js?v=2"></script>
+    <script>
+    function formatDate(dateStr) {
+        if (!dateStr) return '—';
+        const parts = dateStr.split('-');
+        if (parts.length === 3) return `${parts[2]}.${parts[1]}.${parts[0]}`;
+        return dateStr;
+    }
+    
+    function isOverdue(dateStr) {
+        if (!dateStr) return false;
+        return new Date(dateStr) < new Date();
+    }
+    
+    window.dismissReminder = async function(id) {
+        try {
+            await API.put(`/api/reminders/${id}/sent`);
+            location.reload();
+        } catch (err) {
+            showToast('Ошибка', 'error');
+        }
+    };
+    
+    (async function() {
+        if (!API.requireAuth()) return;
+        
+        const user = API.getCurrentUser();
+        const app = document.getElementById('app');
+        
+        app.innerHTML = renderSidebar('dashboard') + renderHeader() + `
+            <div class="page-header">
+                <div><h1 class="page-title">Добрый день, ${user ? user.name : 'Админ'}</h1><p class="page-subtitle" id="currentDate"></p></div>
+                <div class="page-actions">
+                    <button class="btn btn-secondary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Быстрая задача</button>
+                </div>
+            </div>
+            <div class="stats-grid" id="statsGrid"></div>
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Задачи</h3><a href="/pages/tasks.html" class="btn btn-ghost btn-sm">Все</a></div>
+                    <div class="card-body" style="padding:12px;" id="todayTasks"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Проекты</h3><a href="/pages/projects.html" class="btn btn-ghost btn-sm">Все</a></div>
+                    <div class="card-body" style="padding:0;" id="recentProjects"></div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:16px;" id="remindersCard">
+                <div class="card-header"><h3 class="card-title">Напоминания об оплате</h3></div>
+                <div class="card-body" style="padding:12px;" id="remindersList"></div>
+            </div>
+            </div></div></div>
+        `;
+        
+        initCommonUI();
+        
+        const now = new Date();
+        document.getElementById('currentDate').textContent = 'Сегодня, ' + now.toLocaleDateString('ru-RU');
+        
+        await CRM.load();
+        const stats = await API.getStats();
+        
+        // Render stats
+        document.getElementById('statsGrid').innerHTML = `
+            <div class="stat-card"><div class="stat-icon blue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></div><div class="stat-info"><div class="stat-label">Проекты</div><div class="stat-value">${stats.totalProjects || 0}</div></div></div>
+            <div class="stat-card"><div class="stat-icon yellow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg></div><div class="stat-info"><div class="stat-label">Задачи</div><div class="stat-value">${stats.pendingTasks || 0}</div></div></div>
+            <div class="stat-card"><div class="stat-icon green"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div><div class="stat-info"><div class="stat-label">Оплата</div><div class="stat-value">${formatAmount(stats.pendingPayments || 0)}</div></div></div>
+            <div class="stat-card"><div class="stat-icon purple"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="stat-info"><div class="stat-label">Клиенты</div><div class="stat-value">${stats.totalClients || 0}</div></div></div>
+        `;
+        
+        // Render tasks
+        const tasks = CRM.getTasks().filter(t => !t.done).slice(0, 5);
+        if (tasks.length === 0) {
+            document.getElementById('todayTasks').innerHTML = '<p class="text-muted" style="text-align:center;padding:20px;">Нет активных задач</p>';
+        } else {
+            document.getElementById('todayTasks').innerHTML = '<div class="task-list">' + tasks.map(t => {
+                const project = CRM.getProject(t.project_id);
+                return `<div class="task-item">
+                    <input type="checkbox" class="task-checkbox" data-task-id="${t.id}">
+                    <div class="task-info">
+                        <div class="task-name">${t.name}</div>
+                        <div class="task-meta"><span class="task-project">${project ? project.name : ''}</span><span>${t.person}</span><span class="task-time">${t.time || ''}</span></div>
+                    </div>
+                </div>`;
+            }).join('') + '</div>';
+            
+            document.querySelectorAll('.task-checkbox').forEach(cb => {
+                cb.addEventListener('change', async () => {
+                    await CRM.updateTask(cb.dataset.taskId, { done: cb.checked, column_status: cb.checked ? 'Готово' : 'В работе' });
+                    showToast(cb.checked ? 'Выполнено' : 'В работе', 'success');
+                    setTimeout(() => location.reload(), 500);
+                });
+            });
+        }
+        
+        // Render projects
+        const projects = CRM.getProjects().slice(0, 5);
+        if (projects.length === 0) {
+            document.getElementById('recentProjects').innerHTML = '<p class="text-muted" style="text-align:center;padding:20px;">Нет проектов</p>';
+        } else {
+            document.getElementById('recentProjects').innerHTML = '<div class="table-wrapper"><table class="table"><thead><tr><th>Проект</th><th>Статус</th><th>Сумма</th></tr></thead><tbody>' +
+                projects.map(p => `<tr>
+                    <td><a href="/pages/project.html?id=${p.id}" style="text-decoration:none;color:inherit;"><div class="table-cell-name">${p.client} — ${p.name}</div></a></td>
+                    <td><span class="badge ${getStatusClass(p.status)}">${p.status}</span></td>
+                    <td class="table-cell-amount">${formatAmount(p.amount)}</td>
+                </tr>`).join('') +
+                '</tbody></table></div>';
+        }
+        
+        // Render reminders
+        try {
+            const reminders = await API.get('/api/reminders?active=true');
+            if (reminders && reminders.length > 0) {
+                document.getElementById('remindersList').innerHTML = reminders.map(r => `
+                    <div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--gray-100);background:${isOverdue(r.payment_due_date) ? 'var(--danger-light)' : 'transparent'};border-radius:var(--radius-md);margin-bottom:8px;">
+                        <div style="width:40px;height:40px;border-radius:50%;background:var(--warning-light);display:flex;align-items:center;justify-content:center;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-weight:600;">${r.project_name}</div>
+                            <div style="font-size:0.85rem;color:var(--gray-500);">${r.project_client} · ${formatAmount(r.project_amount)} ₽</div>
+                            <div style="font-size:0.8rem;color:var(--danger);margin-top:2px;">Оплата: ${formatDate(r.payment_due_date)}</div>
+                        </div>
+                        <button class="btn btn-sm btn-ghost" onclick="dismissReminder(${r.id})" title="Отметить как прочитанное">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"/></svg>
+                        </button>
+                    </div>
+                `).join('');
+            } else {
+                document.getElementById('remindersCard').style.display = 'none';
+            }
+        } catch (err) {
+            document.getElementById('remindersCard').style.display = 'none';
+        }
+        
+        // New Task Modal
+        window.showNewTaskModal = function() {
+
+            const overlay = document.getElementById('modalOverlay');
+            let projectOptions = '';
+            CRM.getProjects().forEach(p => {
+                projectOptions += `<option value="${p.id}">${p.client} — ${p.name}</option>`;
+            });
+            
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Название</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Проект</label><select class="form-select" id="newTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
+                            <div class="form-group"><label class="form-label">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Дата</label><input type="text" class="form-input" id="newTaskDate" placeholder="25.07" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+        
+        window.createTask = async function() {
+            const name = document.getElementById('newTaskName').value.trim();
+            if (!name) { showToast('Введите название', 'error'); return; }
+            
+            try {
+                await CRM.addTask({
+                    project_id: document.getElementById('newTaskProject').value,
+                    name: name,
+                    column_status: 'Ожидает',
+                    person: document.getElementById('newTaskPerson').value,
+                    date: document.getElementById('newTaskDate').value || '—',
+                    time: document.getElementById('newTaskTime').value || '',
+                    done: false,
+                    urgent: false,
+                    hashtags: []
+                });
+                
+                closeModal();
+                showToast('Задача создана', 'success');
+                setTimeout(() => location.reload(), 500);
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+    })();
+    </script>
+</body>
+</html>

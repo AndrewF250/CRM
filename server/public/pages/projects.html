@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Проекты — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <div id="app"></div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+
+    <script src="/assets/js/api.js?v=5"></script>
+    <script src="/assets/js/app.js?v=5"></script>
+    <script src="/assets/js/crm-data.js?v=5"></script>
+    <script>
+    (async function() {
+        if (!API.requireAuth()) return;
+        
+        const app = document.getElementById('app');
+        app.innerHTML = renderSidebar('projects') + renderHeader() + `
+            <div class="page-header">
+                <div><h1 class="page-title">Проекты</h1><p class="page-subtitle">Управление заказами</p></div>
+                <div class="page-actions">
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn btn-secondary btn-sm" id="viewKanban" onclick="switchView('kanban')" style="background:var(--primary-light);color:var(--primary);border-color:var(--primary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> Канбан</button>
+                        <button class="btn btn-secondary btn-sm" id="viewTable" onclick="switchView('table')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg> Таблица</button>
+                    </div>
+                    <button class="btn btn-primary" onclick="showNewProjectModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новый проект</button>
+                </div>
+            </div>
+            <div class="filter-bar" style="flex-wrap:wrap;">
+                <span class="text-sm text-muted" style="margin-right:4px;">Статус:</span>
+                <button class="filter-chip active" onclick="filterProjects('all', this)">Все</button>
+                <button class="filter-chip" onclick="filterProjects('В работе', this)">В работе</button>
+                <button class="filter-chip" onclick="filterProjects('Переговоры', this)">Переговоры</button>
+                <button class="filter-chip" onclick="filterProjects('Новый', this)">Новые</button>
+                <button class="filter-chip" onclick="filterProjects('Выполнено', this)">Выполнено</button>
+                <span class="text-sm text-muted" style="margin-left:12px;margin-right:4px;">Хештег:</span>
+                <select class="form-select" id="hashtagFilter" onchange="filterByHashtag(this.value)" style="width:auto;padding:4px 8px;font-size:0.8rem;">
+                    <option value="">Все хештеги</option>
+                </select>
+            </div>
+            <div id="kanbanView"></div>
+            <div id="tableView" class="hidden"></div>
+            </div></div></div>
+        `;
+        
+        initCommonUI();
+        await CRM.load();
+        
+        // Load hashtags for filter
+        const hashtags = await API.gethashtags ? await API.gethashtags() : [];
+        const hashtagSelect = document.getElementById('hashtagFilter');
+        if (Array.isArray(hashtags)) {
+            hashtags.forEach(h => {
+                hashtagSelect.innerHTML += `<option value="${h}">${h}</option>`;
+            });
+        }
+        
+        let currentFilter = 'all';
+        let currentHashtag = '';
+        
+        window.switchView = function(view) {
+            const kanban = document.getElementById('kanbanView');
+            const table = document.getElementById('tableView');
+            const btnKanban = document.getElementById('viewKanban');
+            const btnTable = document.getElementById('viewTable');
+            
+            if (view === 'kanban') {
+                kanban.classList.remove('hidden');
+                table.classList.add('hidden');
+                btnKanban.style.background = 'var(--primary-light)';
+                btnKanban.style.color = 'var(--primary)';
+                btnKanban.style.borderColor = 'var(--primary)';
+                btnTable.style.background = '';
+                btnTable.style.color = '';
+                btnTable.style.borderColor = '';
+            } else {
+                kanban.classList.add('hidden');
+                table.classList.remove('hidden');
+                btnTable.style.background = 'var(--primary-light)';
+                btnTable.style.color = 'var(--primary)';
+                btnTable.style.borderColor = 'var(--primary)';
+                btnKanban.style.background = '';
+                btnKanban.style.color = '';
+                btnKanban.style.borderColor = '';
+            }
+        };
+        
+        window.filterProjects = function(status, btn) {
+            currentFilter = status;
+            document.querySelectorAll('.filter-bar .filter-chip').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            renderProjects();
+        };
+        
+        window.filterByHashtag = function(tag) {
+            currentHashtag = tag;
+            renderProjects();
+        };
+        
+        window.deleteProject = async function(id) {
+            if (!confirm('Удалить проект и все его задачи?')) return;
+            try {
+                await API.deleteProject(id);
+                showToast('Проект удалён', 'success');
+                await CRM.load();
+                renderProjects();
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+        
+        function getFilteredProjects() {
+            let projects = CRM.getProjects();
+            if (currentFilter !== 'all') {
+                projects = projects.filter(p => p.status === currentFilter);
+            }
+            if (currentHashtag) {
+                projects = projects.filter(p => p.hashtags && p.hashtags.includes(currentHashtag));
+            }
+            return projects;
+        }
+        
+        function formatAmountInput(value) {
+            return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        }
+        
+        function renderProjects() {
+            const projects = getFilteredProjects();
+            
+            const columns = [
+                { name: 'Новый', dot: 'blue' },
+                { name: 'Переговоры', dot: 'yellow' },
+                { name: 'В работе', dot: 'green' },
+                { name: 'Абонемент', dot: 'blue' },
+                { name: 'Выполнено', dot: 'gray' }
+            ];
+            
+            let kanbanHtml = '<div class="kanban-board">';
+            columns.forEach(col => {
+                const colProjects = projects.filter(p => p.status === col.name);
+                kanbanHtml += `<div class="kanban-column"><div class="kanban-column-header"><div class="kanban-column-title"><span class="status-dot ${col.dot}"></span> ${col.name} <span class="kanban-count">${colProjects.length}</span></div></div><div class="kanban-column-body" data-column="${col.name}">`;
+                colProjects.forEach(p => {
+                    const adeqEmoji = { 'good': '😊', 'warn': '😐', 'bad': '😡' };
+                    kanbanHtml += `<div class="kanban-card${p.urgent ? ' urgent' : ''}" draggable="true" data-project-id="${p.id}">
+                        <a href="/pages/project.html?id=${p.id}" style="text-decoration:none;color:inherit;display:block;" onclick="event.stopPropagation()">
+                            <div style="display:flex;justify-content:space-between;align-items:start;">
+                                <div class="kanban-card-title">${p.name}</div>
+                                <div style="display:flex;align-items:center;gap:4px;">
+                                    <span class="pay-icon ${p.pay_status || 'unpaid'}" title="${p.pay_status === 'paid' ? 'Оплачено' : p.pay_status === 'pending' ? 'Ждём оплату' : 'Не оплачено'}">$</span>
+                                    <span class="adequacy-icon ${p.adequacy || 'good'}" title="${p.adequacy === 'good' ? 'Нормальный' : p.adequacy === 'warn' ? 'Осторожно' : 'Не работаем'}">${adeqEmoji[p.adequacy] || '😊'}</span>
+                                    <button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:0.7rem;" onclick="event.preventDefault();event.stopPropagation();deleteProject('${p.id}')">✕</button>
+                                </div>
+                            </div>
+                            <div class="kanban-card-client">${p.client}${p.phone ? ' · ' + p.phone : ''}</div>
+                            ${(p.hashtags && p.hashtags.length > 0) ? '<div class="hashtags" style="margin:4px 0;">' + p.hashtags.map(h => '<span class="hashtag">' + h + '</span>').join('') + '</div>' : ''}
+                            <div class="kanban-card-footer"><span class="kanban-card-status"><span class="status-dot ${col.dot}"></span> ${col.name}</span><span class="kanban-card-amount">${formatAmountInput(p.amount)} ₽</span></div>
+                        </a>
+                    </div>`;
+                });
+                kanbanHtml += '</div></div>';
+            });
+            kanbanHtml += '</div>';
+            document.getElementById('kanbanView').innerHTML = kanbanHtml;
+            
+            let tableHtml = '<div class="card"><div class="table-wrapper"><table class="table"><thead><tr><th>Проект</th><th>Клиент</th><th>Статус</th><th>Оплата</th><th>Сумма</th><th>Прогресс</th><th></th></tr></thead><tbody>';
+            projects.forEach(p => {
+                const adeqEmoji = { 'good': '😊', 'warn': '😐', 'bad': '😡' };
+                tableHtml += `<tr>
+                    <td><a href="/pages/project.html?id=${p.id}" style="text-decoration:none;color:inherit;"><div class="table-cell-name">${p.name}</div>${(p.hashtags||[]).length > 0 ? '<div class="hashtags" style="margin-top:4px;">' + p.hashtags.map(h => '<span class="hashtag">'+h+'</span>').join('') + '</div>' : ''}</a></td>
+                    <td>${p.client}<br><span class="text-sm text-muted">${p.phone || ''}</span></td>
+                    <td><span class="badge ${getStatusClass(p.status)}">${p.status}</span></td>
+                    <td><span class="pay-icon ${p.pay_status || 'unpaid'}" title="${p.pay_status === 'paid' ? 'Оплачено' : p.pay_status === 'pending' ? 'Ждём' : 'Не оплачено'}">$</span> <span class="adequacy-icon ${p.adequacy || 'good'}" title="${p.adequacy === 'good' ? 'Нормальный' : p.adequacy === 'warn' ? 'Осторожно' : 'Не работаем'}">${adeqEmoji[p.adequacy] || '😊'}</span></td>
+                    <td class="table-cell-amount">${formatAmountInput(p.amount)} ₽</td>
+                    <td><div class="progress-bar" style="width:80px;"><div class="progress-fill" style="width:${p.progress}%;"></div></div></td>
+                    <td><button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteProject('${p.id}')">Удалить</button></td>
+                </tr>`;
+            });
+            tableHtml += '</tbody></table></div></div>';
+            document.getElementById('tableView').innerHTML = tableHtml;
+            
+            initDragDrop();
+        }
+        
+        renderProjects();
+        
+        function initDragDrop() {
+            const cards = document.querySelectorAll('.kanban-card[draggable]');
+            const columns = document.querySelectorAll('.kanban-column-body');
+            
+            cards.forEach(card => {
+                card.addEventListener('dragstart', function(e) {
+                    this.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', this.dataset.projectId);
+                });
+                card.addEventListener('dragend', function() {
+                    this.classList.remove('dragging');
+                    document.querySelectorAll('.kanban-column-body').forEach(col => {
+                        col.style.background = '';
+                        col.style.minHeight = '';
+                    });
+                });
+            });
+            
+            columns.forEach(col => {
+                col.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    this.style.background = 'rgba(99,102,241,0.08)';
+                    this.style.minHeight = '100px';
+                });
+                col.addEventListener('dragleave', function() {
+                    this.style.background = '';
+                    this.style.minHeight = '';
+                });
+                col.addEventListener('drop', async function(e) {
+                    e.preventDefault();
+                    this.style.background = '';
+                    this.style.minHeight = '';
+                    
+                    const projectId = e.dataTransfer.getData('text/plain');
+                    const newStatus = this.dataset.column;
+                    
+                    if (projectId && newStatus) {
+                        try {
+                            const project = CRM.getProject(projectId);
+                            if (project && project.status !== newStatus) {
+                                await API.updateProject(projectId, {
+                                    ...project,
+                                    status: newStatus
+                                });
+                                showToast('Статус: ' + newStatus, 'success');
+                                await CRM.load();
+                                renderProjects();
+                            }
+                        } catch (err) {
+                            showToast('Ошибка', 'error');
+                        }
+                    }
+                });
+            });
+        }
+        
+        window.showNewProjectModal = function() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Новый проект</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Название *</label><input type="text" class="form-input" id="newProjectName" placeholder="Название проекта" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Клиент *</label><input type="text" class="form-input" id="newProjectClient" placeholder="Имя клиента" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Телефон</label><input type="tel" class="form-input" id="newProjectPhone" placeholder="+7 (999) 123-45-67" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Сумма (₽)</label><input type="text" class="form-input" id="newProjectAmount" placeholder="0" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()" oninput="formatAmountField(this)"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Дедлайн</label><input type="text" class="form-input" id="newProjectDeadline" placeholder="01.08.2026" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Дата оплаты</label><input type="date" class="form-input" id="newProjectPayDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Статус</label><select class="form-select" id="newProjectStatus" onclick="event.stopPropagation()"><option>Новый</option><option>Переговоры</option><option>В работе</option></select></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Источник</label><select class="form-select" id="newProjectSource" onclick="event.stopPropagation()"><option>Сайт</option><option>Авито</option><option>Telegram</option><option>Реклама</option><option>Знакомые</option></select></div>
+                            <div class="form-group"><label class="form-label">Адекватность</label><select class="form-select" id="newProjectAdequacy" onclick="event.stopPropagation()"><option value="good">Нормальный</option><option value="warn">Осторожно</option><option value="bad">Не работаем</option></select></div>
+                        </div>
+                        <div class="form-group"><label class="form-label">Хештеги (через запятую)</label><input type="text" class="form-input" id="newProjectHashtags" placeholder="#wordpress, #сайт, #лендинг" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label">Описание</label><textarea class="form-textarea" id="newProjectDescription" placeholder="Описание проекта" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></textarea></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createProject()">Создать</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+        
+        window.formatAmountField = function(input) {
+            let value = input.value.replace(/\s/g, '').replace(/[^\d]/g, '');
+            if (value) {
+                input.value = value.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            }
+        };
+        
+        window.createProject = async function() {
+            const name = document.getElementById('newProjectName').value.trim();
+            const client = document.getElementById('newProjectClient').value.trim();
+            
+            if (!name || !client) {
+                showToast('Заполните название и клиента', 'error');
+                return;
+            }
+            
+            const hashtagsRaw = document.getElementById('newProjectHashtags').value.trim();
+            const hashtags = hashtagsRaw ? hashtagsRaw.split(',').map(h => h.trim().startsWith('#') ? h.trim() : '#' + h.trim()).filter(h => h.length > 1) : [];
+            
+            const amountStr = document.getElementById('newProjectAmount').value.replace(/\s/g, '').replace(/[^\d]/g, '');
+            
+            try {
+                await CRM.createProject({
+                    name: name,
+                    client: client,
+                    phone: document.getElementById('newProjectPhone').value.trim(),
+                    amount: parseInt(amountStr) || 0,
+                    deadline: document.getElementById('newProjectDeadline').value || '—',
+                    payment_due_date: document.getElementById('newProjectPayDate').value || '',
+                    status: document.getElementById('newProjectStatus').value,
+                    source: document.getElementById('newProjectSource').value,
+                    adequacy: document.getElementById('newProjectAdequacy').value,
+                    description: document.getElementById('newProjectDescription').value || '',
+                    urgent: false,
+                    progress: 0,
+                    pay_status: 'unpaid',
+                    pay_method: 'По счёту',
+                    discount: 'no',
+                    discount_val: '',
+                    hashtags: hashtags
+                });
+                
+                closeModal();
+                showToast('Проект создан', 'success');
+                await CRM.load();
+                renderProjects();
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+    })();
+    </script>
+</body>
+</html>

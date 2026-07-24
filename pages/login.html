@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход — CRM System</title>
+    <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body class="login-page">
+<div class="login-card">
+    <div class="login-logo">
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none"><rect width="44" height="44" rx="12" fill="#6366F1"/><path d="M10 10h10v10H10z" fill="none" stroke="white" stroke-width="2.5" rx="2"/><path d="M24 10h10v10H24z" fill="none" stroke="white" stroke-width="2.5" rx="2"/><path d="M10 24h10v10H10z" fill="none" stroke="white" stroke-width="2.5" rx="2"/><path d="M24 24h10v10H24z" fill="none" stroke="white" stroke-width="2.5" rx="2"/></svg>
+        <h1 class="login-title">WebAgency CRM</h1>
+        <p class="login-subtitle">Войдите в панель управления</p>
+    </div>
+    <form onsubmit="event.preventDefault(); window.location.href='dashboard.html';">
+        <div class="form-group"><label class="form-label">Email</label><input type="email" class="form-input" value="admin@webagency.ru"></div>
+        <div class="form-group"><label class="form-label">Пароль</label><input type="password" class="form-input" value="password"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;"><label class="form-check"><input type="checkbox" checked> Запомнить</label><a href="#" class="text-sm">Забыли пароль?</a></div>
+        <button type="submit" class="btn btn-primary btn-lg" style="width:100%;">Войти</button>
+    </form>
+    <p class="text-center text-sm text-muted" style="margin-top:24px;">Нет аккаунта? <a href="#">Зарегистрироваться</a></p>
+</div>
+</body>
+</html>

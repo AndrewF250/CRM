@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дашборд — CRM System</title>
+    <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <div class="logo-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6H4z"/><path d="M14 14h6v6h-6z"/></svg>
+                </div>
+                <div class="logo-text">
+                    <span class="logo-name">WebAgency</span>
+                    <span class="logo-sub">CRM System</span>
+                </div>
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">Главное</div>
+                <a href="dashboard.html" class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Дашборд</span></a>
+                <a href="projects.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg><span>Проекты</span><span class="nav-badge">12</span></a>
+                <a href="tasks.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg><span>Задачи</span><span class="nav-badge warning">5</span></a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">Работа</div>
+                <a href="documents.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg><span>Документы</span></a>
+                <a href="calendar.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span>Календарь</span></a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">Система</div>
+                <a href="settings.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg><span>Настройки</span></a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="sidebar-user">
+                <div class="user-avatar"><span>АИ</span></div>
+                <div class="user-info">
+                    <div class="user-name">Админ Иван</div>
+                    <div class="user-role">Администратор</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <div class="main-wrapper">
+        <header class="header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle" aria-label="Меню">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <div class="header-search">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" class="search-input" placeholder="Поиск...">
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="header-btn" onclick="openModal('newProjectModal')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <span class="btn-text">Новый проект</span>
+                </button>
+                <div class="header-notifications">
+                    <button class="header-icon-btn" id="notifBtn" title="Уведомления">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                        <span class="notif-badge">3</span>
+                    </button>
+                    <div class="notif-dropdown" id="notifDropdown">
+                        <div class="notif-header"><span>Уведомления</span><a href="#" class="notif-clear">Очистить</a></div>
+                        <div class="notif-list">
+                            <div class="notif-item unread"><div class="notif-dot"></div><div class="notif-content"><p>Дедлайн «Авито бот» сегодня</p><span class="notif-time">2 мин назад</span></div></div>
+                            <div class="notif-item unread"><div class="notif-dot"></div><div class="notif-content"><p>Новый отзыв от ИП Петров</p><span class="notif-time">15 мин назад</span></div></div>
+                            <div class="notif-item"><div class="notif-content"><p>Оплата: Заказ #1024 — 45 000 ₽</p><span class="notif-time">1 час назад</span></div></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-user-menu">
+                    <button class="header-user-btn" id="userMenuBtn"><div class="header-avatar">АИ</div></button>
+                    <div class="user-dropdown" id="userDropdown">
+                        <a href="settings.html" class="dropdown-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg> Настройки</a>
+                        <div class="dropdown-divider"></div>
+                        <a href="login.html" class="dropdown-item danger"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Выйти</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+        <main class="main-content">
+            <div class="content-wrapper">
+    <div class="page-header">
+        <div><h1 class="page-title">Доброе утро, Админ</h1><p class="page-subtitle">Сегодня, 22.07.2026</p></div>
+        <div class="page-actions"><button class="btn btn-secondary" onclick="openModal('newTaskModal')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Быстрая задача</button></div>
+    </div>
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-icon blue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></div><div class="stat-info"><div class="stat-label">Активные проекты</div><div class="stat-value">12</div><div class="stat-change up">+2 на неделе</div></div></div>
+        <div class="stat-card"><div class="stat-icon yellow"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg></div><div class="stat-info"><div class="stat-label">Задачи на сегодня</div><div class="stat-value">8</div><div class="stat-change down">3 просрочены</div></div></div>
+        <div class="stat-card"><div class="stat-icon green"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div><div class="stat-info"><div class="stat-label">Ожидает оплаты</div><div class="stat-value">285 000 ₽</div><div class="stat-change">3 проекта</div></div></div>
+        <div class="stat-card"><div class="stat-icon purple"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="stat-info"><div class="stat-label">Клиентов</div><div class="stat-value">24</div><div class="stat-change up">+1 новый</div></div></div>
+    </div>
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Задачи на сегодня</h3><a href="tasks.html" class="btn btn-ghost btn-sm">Все</a></div>
+            <div class="card-body" style="padding:12px;">
+                <div class="task-list">
+                    <div class="task-item"><input type="checkbox" class="task-checkbox"><div class="task-info"><div class="task-name">Настроить Авито бота для ИП Петров</div><div class="task-meta"><span class="task-project">ИП Петров</span><span class="task-deadline overdue">Просрочено</span><span class="timer-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg></span><span class="task-time">10:00</span></div><div class="hashtags"><span class="hashtag bot">#бот</span><span class="hashtag avito">#авито</span></div></div><span class="badge badge-danger">Срочно</span></div>
+                    <div class="task-item"><input type="checkbox" class="task-checkbox"><div class="task-info"><div class="task-name">Согласовать макет главной</div><div class="task-meta"><span class="task-project">ООО Ромашка</span><span class="task-deadline">Сегодня</span><span class="task-time">14:00</span></div><div class="hashtags"><span class="hashtag wp">#wordpress</span><span class="hashtag design">#дизайн</span></div></div><span class="badge badge-warning">Согласуем</span></div>
+                    <div class="task-item"><input type="checkbox" class="task-checkbox"><div class="task-info"><div class="task-name">Запустить контекстную рекламу</div><div class="task-meta"><span class="task-project">Студия Маяк</span><span class="task-deadline">Сегодня</span><span class="task-time">16:00</span></div><div class="hashtags"><span class="hashtag ads">#реклама</span><span class="hashtag seo">#директ</span></div></div><span class="badge badge-success">В работе</span></div>
+                    <div class="task-item"><input type="checkbox" class="task-checkbox" checked><div class="task-info"><div class="task-name">Отправить отчёт по SEO</div><div class="task-meta"><span class="task-project">ИП Сидоров</span><span class="task-time">09:00</span></div><div class="hashtags"><span class="hashtag seo">#seo</span><span class="hashtag seo">#отчёт</span></div></div><span class="badge badge-gray">Готово</span></div>
+                    <div class="task-item"><input type="checkbox" class="task-checkbox"><div class="task-info"><div class="task-name">Настроить Telegram-бот</div><div class="task-meta"><span class="task-project">ООО ТехноСервис</span><span class="task-deadline">Завтра</span><span class="task-time">11:00</span></div><div class="hashtags"><span class="hashtag bot">#бот</span><span class="hashtag tg">#telegram</span></div></div><span class="badge badge-success">В работе</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Недавние проекты</h3><a href="projects.html" class="btn btn-ghost btn-sm">Все</a></div>
+            <div class="card-body" style="padding:0;">
+                <div class="table-wrapper"><table class="table"><thead><tr><th>Проект</th><th>Статус</th><th>$</th><th>Сумма</th></tr></thead><tbody>
+                    <tr><td><div class="table-cell-name">ИП Петров — Авито бот</div><div class="table-cell-sub">Бот, Авито</div></td><td><span class="badge badge-success">В работе</span></td><td><span class="pay-icon unpaid">$</span></td><td class="table-cell-amount">85 000 ₽</td></tr>
+                    <tr><td><div class="table-cell-name">ООО Ромашка — Сайт</div><div class="table-cell-sub">WordPress</div></td><td><span class="badge badge-warning">Переговоры</span></td><td><span class="pay-icon pending">$</span></td><td class="table-cell-amount">150 000 ₽</td></tr>
+                    <tr><td><div class="table-cell-name">Студия Маяк — Реклама</div><div class="table-cell-sub">Директ</div></td><td><span class="badge badge-primary">В работе</span></td><td><span class="pay-icon paid">$</span></td><td class="table-cell-amount">45 000 ₽</td></tr>
+                    <tr><td><div class="table-cell-name">ИП Сидоров — SEO</div><div class="table-cell-sub">SEO, Авито</div></td><td><span class="badge badge-info">Абонемент</span></td><td><span class="pay-icon unpaid">$</span></td><td class="table-cell-amount">30 000 ₽/мес</td></tr>
+                </tbody></table></div>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="newTaskModal"><div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div><div class="modal-body"><div class="form-group"><label class="form-label">Название</label><input type="text" class="form-input" placeholder="Что сделать?"></div><div class="form-row"><div class="form-group"><label class="form-label">Проект</label><select class="form-select"><option>ИП Петров</option><option>ООО Ромашка</option></select></div><div class="form-group"><label class="form-label">Дедлайн</label><input type="date" class="form-input"></div><div class="form-group"><label class="form-label">Время</label><input type="time" class="form-input"></div></div></div><div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="closeModal();showToast('Создано','success')">Создать</button></div></div>
+</div>
+        </main>
+    </div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+<script src="../assets/js/crm-data.js"></script>
+<script src="../assets/js/layout.js"></script>
+</body>
+</html>

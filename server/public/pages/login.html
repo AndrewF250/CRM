@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body class="login-page">
+<div class="login-card">
+    <div class="login-logo">
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none"><rect width="44" height="44" rx="12" fill="#6366F1"/><path d="M10 10h10v10H10z" fill="none" stroke="white" stroke-width="2.5" rx="2"/><path d="M24 10h10v10H24z" fill="none" stroke="white" stroke-width="2.5" rx="2"/><path d="M10 24h10v10H10z" fill="none" stroke="white" stroke-width="2.5" rx="2"/><path d="M24 24h10v10H24z" fill="none" stroke="white" stroke-width="2.5" rx="2"/></svg>
+        <h1 class="login-title">WebAgency CRM</h1>
+        <p class="login-subtitle">Войдите в панель управления</p>
+    </div>
+    <form id="loginForm">
+        <div class="form-group">
+            <label class="form-label">Логин</label>
+            <input type="text" class="form-input" id="username" placeholder="Введите логин" required autofocus>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Пароль</label>
+            <input type="password" class="form-input" id="password" placeholder="Введите пароль" required>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+            <label class="form-check"><input type="checkbox" id="remember" checked> Запомнить устройство</label>
+        </div>
+        <div id="errorMsg" style="display:none;color:var(--danger);font-size:0.85rem;margin-bottom:16px;padding:10px;background:var(--danger-light);border-radius:8px;"></div>
+        <button type="submit" class="btn btn-primary btn-lg" style="width:100%;">Войти</button>
+    </form>
+</div>
+
+<script src="/assets/js/api.js?v=7"></script>
+<script>
+// Check if already logged in and token is valid
+(async function() {
+    if (API.isLoggedIn()) {
+        try {
+            const result = await API.checkAuth();
+            if (result && result.user) {
+                window.location.href = '/pages/dashboard.html';
+                return;
+            }
+        } catch (e) {
+            // Token invalid, clear it
+            API.clearToken();
+        }
+    }
+})();
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const remember = document.getElementById('remember').checked;
+    const errorMsg = document.getElementById('errorMsg');
+    const btn = e.target.querySelector('button[type="submit"]');
+    
+    if (!username || !password) {
+        errorMsg.textContent = 'Введите логин и пароль';
+        errorMsg.style.display = 'block';
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = 'Вход...';
+    
+    try {
+        const result = await API.login(username, password, remember);
+        
+        if (result && result.token) {
+            window.location.href = '/pages/dashboard.html';
+        }
+    } catch (err) {
+        errorMsg.textContent = err.message || 'Неверный логин или пароль';
+        errorMsg.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Войти';
+    }
+});
+</script>
+</body>
+</html>

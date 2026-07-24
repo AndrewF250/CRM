@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Документы — CRM System</title>
+    <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <div class="logo-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6H4z"/><path d="M14 14h6v6h-6z"/></svg>
+                </div>
+                <div class="logo-text">
+                    <span class="logo-name">WebAgency</span>
+                    <span class="logo-sub">CRM System</span>
+                </div>
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">Главное</div>
+                <a href="dashboard.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Дашборд</span></a>
+                <a href="projects.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg><span>Проекты</span><span class="nav-badge">12</span></a>
+                <a href="tasks.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg><span>Задачи</span><span class="nav-badge warning">5</span></a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">Работа</div>
+                <a href="documents.html" class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg><span>Документы</span></a>
+                <a href="calendar.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span>Календарь</span></a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">Система</div>
+                <a href="settings.html" class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg><span>Настройки</span></a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="sidebar-user">
+                <div class="user-avatar"><span>АИ</span></div>
+                <div class="user-info">
+                    <div class="user-name">Админ Иван</div>
+                    <div class="user-role">Администратор</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <div class="main-wrapper">
+        <header class="header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle" aria-label="Меню">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <div class="header-search">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" class="search-input" placeholder="Поиск...">
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="header-btn" onclick="openModal('newProjectModal')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <span class="btn-text">Новый проект</span>
+                </button>
+                <div class="header-notifications">
+                    <button class="header-icon-btn" id="notifBtn" title="Уведомления">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                        <span class="notif-badge">3</span>
+                    </button>
+                    <div class="notif-dropdown" id="notifDropdown">
+                        <div class="notif-header"><span>Уведомления</span><a href="#" class="notif-clear">Очистить</a></div>
+                        <div class="notif-list">
+                            <div class="notif-item unread"><div class="notif-dot"></div><div class="notif-content"><p>Дедлайн «Авито бот» сегодня</p><span class="notif-time">2 мин назад</span></div></div>
+                            <div class="notif-item unread"><div class="notif-dot"></div><div class="notif-content"><p>Новый отзыв от ИП Петров</p><span class="notif-time">15 мин назад</span></div></div>
+                            <div class="notif-item"><div class="notif-content"><p>Оплата: Заказ #1024 — 45 000 ₽</p><span class="notif-time">1 час назад</span></div></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-user-menu">
+                    <button class="header-user-btn" id="userMenuBtn"><div class="header-avatar">АИ</div></button>
+                    <div class="user-dropdown" id="userDropdown">
+                        <a href="settings.html" class="dropdown-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg> Настройки</a>
+                        <div class="dropdown-divider"></div>
+                        <a href="login.html" class="dropdown-item danger"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Выйти</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+        <main class="main-content">
+            <div class="content-wrapper">
+    <div class="page-header"><div><h1 class="page-title">Документы</h1><p class="page-subtitle">Файлы по всем проектам</p></div><div class="page-actions"><button class="btn btn-primary" onclick="openModal('uploadDocModal')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Загрузить</button></div></div>
+    <div class="filter-bar"><span class="text-sm text-muted" style="margin-right:4px;">Проект:</span><button class="filter-chip active">Все</button><button class="filter-chip">ИП Петров</button><button class="filter-chip">ООО Ромашка</button><button class="filter-chip">Студия Маяк</button><button class="filter-chip">ООО ТехноСервис</button></div>
+
+    <div class="card" style="margin-bottom:20px;"><div class="card-header"><div style="display:flex;align-items:center;gap:8px;"><span class="status-dot green"></span><h3 class="card-title">Авито бот — ИП Петров</h3></div><a href="project_petrov.html" class="btn btn-ghost btn-sm">Открыть проект</a></div><div class="card-body" style="padding:0;"><div class="docs-list">
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#3B82F615;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">ТЗ_бот.docx</div><div class="text-sm text-muted">DOCX · 128 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Договор.pdf</div><div class="text-sm text-muted">PDF · 245 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#10B98115;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Исходники.zip</div><div class="text-sm text-muted">ZIP · 4.2 MB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+    </div></div></div>
+
+    <div class="card" style="margin-bottom:20px;"><div class="card-header"><div style="display:flex;align-items:center;gap:8px;"><span class="status-dot yellow"></span><h3 class="card-title">Корпоративный сайт — ООО Ромашка</h3></div><a href="project_romashka.html" class="btn btn-ghost btn-sm">Открыть проект</a></div><div class="card-body" style="padding:0;"><div class="docs-list">
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Бриф_Ромашка.pdf</div><div class="text-sm text-muted">PDF · 180 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Договор_Ромашка.pdf</div><div class="text-sm text-muted">PDF · 312 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+    </div></div></div>
+
+    <div class="card" style="margin-bottom:20px;"><div class="card-header"><div style="display:flex;align-items:center;gap:8px;"><span class="status-dot green"></span><h3 class="card-title">Контекстная реклама — Студия Маяк</h3></div><a href="project_mayak.html" class="btn btn-ghost btn-sm">Открыть проект</a></div><div class="card-body" style="padding:0;"><div class="docs-list">
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Договор_Маяк.pdf</div><div class="text-sm text-muted">PDF · 198 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#10B98115;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Ключи_Директ.xlsx</div><div class="text-sm text-muted">XLSX · 45 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+    </div></div></div>
+
+    <div class="card" style="margin-bottom:20px;"><div class="card-header"><div style="display:flex;align-items:center;gap:8px;"><span class="status-dot green"></span><h3 class="card-title">Telegram бот — ООО ТехноСервис</h3></div><a href="project_tehno.html" class="btn btn-ghost btn-sm">Открыть проект</a></div><div class="card-body" style="padding:0;"><div class="docs-list">
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#3B82F615;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">ТЗ_бот_Техно.docx</div><div class="text-sm text-muted">DOCX · 95 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#10B98115;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Скриншоты.zip</div><div class="text-sm text-muted">ZIP · 2.1 MB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+    </div></div></div>
+
+    <div class="card" style="margin-bottom:20px;"><div class="card-header"><div style="display:flex;align-items:center;gap:8px;"><span class="status-dot green"></span><h3 class="card-title">SEO аудит — ИП Кузнецов</h3></div><a href="project_kuznetsov.html" class="btn btn-ghost btn-sm">Открыть проект</a></div><div class="card-body" style="padding:0;"><div class="docs-list">
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Аудит_сайта.pdf</div><div class="text-sm text-muted">PDF · 1.2 MB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+    </div></div></div>
+
+    <div class="card" style="margin-bottom:20px;"><div class="card-header"><div style="display:flex;align-items:center;gap:8px;"><span class="status-dot blue"></span><h3 class="card-title">SEO продвижение — ИП Сидоров</h3></div><a href="project_sidorov.html" class="btn btn-ghost btn-sm">Открыть проект</a></div><div class="card-body" style="padding:0;"><div class="docs-list">
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Договор_Сидоров.pdf</div><div class="text-sm text-muted">PDF · 210 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Отчёт_Июнь.pdf</div><div class="text-sm text-muted">PDF · 890 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+    </div></div></div>
+
+    <div class="card" style="margin-bottom:20px;"><div class="card-header"><div style="display:flex;align-items:center;gap:8px;"><span class="status-dot blue"></span><h3 class="card-title">Поддержка сайта — ООО Веста</h3></div><a href="project_vesta.html" class="btn btn-ghost btn-sm">Открыть проект</a></div><div class="card-body" style="padding:0;"><div class="docs-list">
+        <div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:#EF444415;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">Договор_Веста.pdf</div><div class="text-sm text-muted">PDF · 180 KB</div></div></div><button class="btn btn-ghost btn-sm">Скачать</button></div>
+    </div></div></div>
+
+    <div class="modal" id="uploadDocModal"><div class="modal-header"><h3 class="modal-title">Загрузить файл</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div><div class="modal-body">
+        <div class="form-group"><label class="form-label">Проект</label><select class="form-select"><option>ИП Петров — Авито бот</option><option>ООО Ромашка — Корпоративный сайт</option><option>Студия Маяк — Контекстная реклама</option><option>ООО ТехноСервис — Telegram бот</option><option>ИП Кузнецов — SEO аудит</option><option>ИП Сидоров — SEO продвижение</option><option>ИП Бариста — Лендинг кофейни</option><option>ООО Стиль — Интернет-магазин</option><option>Стартап XYZ — Мобильное приложение</option><option>ООО АвтоДеталь — Настройка Авито</option><option>ИП Мастеров — Сайт-визитка</option><option>ООО Веста — Поддержка сайта</option></select></div>
+        <div class="form-group"><label class="form-label">Название файла</label><input type="text" class="form-input" placeholder="Договор.pdf"></div>
+        <div class="form-group"><label class="form-label">Тип</label><select class="form-select"><option>PDF</option><option>DOCX</option><option>ZIP</option><option>PNG</option><option>XLSX</option></select></div>
+        <div class="form-group"><label class="form-label">Файл</label><div style="border:2px dashed var(--gray-300);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--primary)';this.style.background='var(--primary-light)'" onmouseout="this.style.borderColor='var(--gray-300)';this.style.background='transparent'"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" stroke-width="1.5" style="margin:0 auto 8px;display:block;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><p class="fw-600 text-muted">Перетащите файл сюда</p><p class="text-xs text-muted mt-sm">PDF, DOCX, ZIP, PNG, XLSX — до 50 MB</p></div></div>
+    </div><div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="closeModal();showToast('Файл загружен','success')">Загрузить</button></div></div>
+</div>
+        </main>
+    </div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+<script src="../assets/js/crm-data.js"></script>
+<script src="../assets/js/layout.js"></script>
+</body>
+</html>

@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Задачи — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+    <style>
+        .task-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px; transition: all 0.15s; }
+        .task-card:hover { box-shadow: var(--shadow-sm); }
+        .task-card.done { opacity: 0.6; }
+        .task-card.done .task-name { text-decoration: line-through; color: var(--gray-400); }
+        .subtask-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--gray-100); }
+        .subtask-item:last-child { border-bottom: none; }
+        .subtask-checkbox { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+        .subtask-name { flex: 1; font-size: 0.85rem; }
+        .subtask-name.done { text-decoration: line-through; color: var(--gray-400); }
+        .subtask-meta { font-size: 0.75rem; color: var(--gray-500); }
+        .activity-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+        .activity-dot.create { background: var(--success); }
+        .activity-dot.complete { background: var(--primary); }
+        .activity-dot.status { background: var(--warning); }
+        .activity-text { flex: 1; }
+        .activity-text strong { font-weight: 600; }
+        .activity-time { font-size: 0.75rem; color: var(--gray-400); margin-top: 2px; }
+        .layout-2col { display: grid; grid-template-columns: 1fr 350px; gap: 24px; }
+        @media (max-width: 1200px) { .layout-2col { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+
+    <script src="/assets/js/api.js?v=6"></script>
+    <script src="/assets/js/app.js?v=6"></script>
+    <script src="/assets/js/crm-data.js?v=6"></script>
+    <script>
+    (async function() {
+        if (!API.requireAuth()) return;
+        
+        const app = document.getElementById('app');
+        app.innerHTML = renderSidebar('tasks') + renderHeader() + `
+            <div class="page-header">
+                <div><h1 class="page-title">Задачи</h1><p class="page-subtitle">Все задачи по проектам</p></div>
+                <div class="page-actions"><button class="btn btn-primary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новая задача</button></div>
+            </div>
+            <div class="filter-bar"><span class="text-sm text-muted" style="margin-right:4px;">Статус:</span><button class="filter-chip active" onclick="filterTasks('all', this)">Все</button><button class="filter-chip" onclick="filterTasks('work', this)">В работе</button><button class="filter-chip" onclick="filterTasks('done', this)">Выполнено</button></div>
+            <div class="layout-2col">
+                <div id="tasksList"></div>
+                <div id="activityFeed">
+                    <div class="card">
+                        <div class="card-header"><h3 class="card-title">Обновления</h3></div>
+                        <div class="card-body" id="activityList" style="max-height:600px;overflow-y:auto;"></div>
+                    </div>
+                </div>
+            </div>
+            </div></div></div>
+        `;
+        
+        initCommonUI();
+        await CRM.load();
+        
+        let currentFilter = 'all';
+        
+        window.filterTasks = function(filter, btn) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-bar .filter-chip').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            renderTasks();
+        };
+        
+        window.deleteTask = async function(id) {
+            if (!confirm('Удалить задачу?')) return;
+            try {
+                await API.deleteTask(id);
+                showToast('Задача удалена', 'success');
+                await CRM.load();
+                renderTasks();
+                loadActivity();
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+        
+        window.toggleTask = async function(taskId, done) {
+            try {
+                await CRM.updateTask(taskId, { done: done, column_status: done ? 'Готово' : 'В работе' });
+                showToast(done ? 'Выполнено' : 'В работе', 'success');
+                await CRM.load();
+                renderTasks();
+                loadActivity();
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+        
+        window.toggleSubtask = async function(subtaskId, done) {
+            try {
+                const subtask = currentSubtasks.find(s => s.id === subtaskId);
+                if (subtask) {
+                    await API.updateSubtask(subtaskId, { ...subtask, done: done });
+                    showToast(done ? 'Подзадача выполнена' : 'Подзадача в работе', 'success');
+                    renderTasks();
+                }
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+        
+        window.deleteSubtask = async function(id) {
+            try {
+                await API.deleteSubtask(id);
+                showToast('Подзадача удалена', 'success');
+                renderTasks();
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+        
+        let currentSubtasks = [];
+        
+        async function loadSubtasks(taskId) {
+            try {
+                const subtasks = await API.getSubtasks(taskId);
+                return subtasks || [];
+            } catch (err) {
+                return [];
+            }
+        }
+        
+        async function renderTasks() {
+            let tasks = CRM.getTasks();
+            if (currentFilter === 'work') tasks = tasks.filter(t => !t.done);
+            if (currentFilter === 'done') tasks = tasks.filter(t => t.done);
+            
+            if (tasks.length === 0) {
+                document.getElementById('tasksList').innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:40px;"><p class="text-muted">Нет задач</p><button class="btn btn-primary" style="margin-top:16px;" onclick="showNewTaskModal()">Создать первую задачу</button></div></div>';
+                return;
+            }
+            
+            // Load all subtasks
+            const allSubtasks = {};
+            for (const t of tasks) {
+                allSubtasks[t.id] = await loadSubtasks(t.id);
+            }
+            currentSubtasks = Object.values(allSubtasks).flat();
+            
+            let html = '';
+            tasks.forEach(t => {
+                const project = CRM.getProject(t.project_id);
+                const subtasks = allSubtasks[t.id] || [];
+                const doneSubtasks = subtasks.filter(s => s.done).length;
+                
+                html += `<div class="task-card${t.done ? ' done' : ''}">
+                    <div style="display:flex;align-items:flex-start;gap:12px;">
+                        <input type="checkbox" class="subtask-checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)" style="margin-top:2px;">
+                        <div style="flex:1;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                                <div>
+                                    <div class="task-name" style="font-weight:600;font-size:0.95rem;${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
+                                    <div style="display:flex;align-items:center;gap:8px;margin-top:4px;font-size:0.8rem;color:var(--gray-500);">
+                                        <a href="/pages/project.html?id=${t.project_id}" style="color:var(--primary);text-decoration:none;">${project ? project.name : ''}</a>
+                                        <span>·</span>
+                                        <span>${t.person}</span>
+                                        <span>·</span>
+                                        <span>${t.date || ''} ${t.time || ''}</span>
+                                        ${t.urgent ? '<span class="badge badge-danger" style="font-size:0.65rem;">СРОЧНО</span>' : ''}
+                                    </div>
+                                    ${subtasks.length > 0 ? '<div style="margin-top:4px;font-size:0.75rem;color:var(--gray-400);">Подзадачи: ' + doneSubtasks + '/' + subtasks.length + '</div>' : ''}
+                                </div>
+                                <div style="display:flex;gap:4px;">
+                                    <button class="btn btn-ghost btn-sm" onclick="showAddSubtaskModal('${t.id}')" title="Добавить подзадачу">+</button>
+                                    <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteTask('${t.id}')" title="Удалить">✕</button>
+                                </div>
+                            </div>
+                            ${subtasks.length > 0 ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);">' + subtasks.map(s => `
+                                <div class="subtask-item">
+                                    <input type="checkbox" class="subtask-checkbox" ${s.done ? 'checked' : ''} onchange="toggleSubtask('${s.id}', this.checked)">
+                                    <span class="subtask-name${s.done ? ' done' : ''}">${s.name}</span>
+                                    <span class="subtask-meta">${s.person || ''} ${s.deadline ? '· ' + s.deadline : ''}</span>
+                                    <button class="btn btn-ghost btn-sm" style="padding:2px 4px;font-size:0.7rem;" onclick="deleteSubtask('${s.id}')">✕</button>
+                                </div>
+                            `).join('') + '</div>' : ''}
+                        </div>
+                    </div>
+                </div>`;
+            });
+            
+            document.getElementById('tasksList').innerHTML = html;
+        }
+        
+        async function loadActivity() {
+            try {
+                const activity = await API.getActivity(null, 30);
+                if (!activity || activity.length === 0) {
+                    document.getElementById('activityList').innerHTML = '<p class="text-muted text-sm">Нет обновлений</p>';
+                    return;
+                }
+                
+                const actionLabels = {
+                    'create_project': 'создал проект',
+                    'change_status': 'изменил статус',
+                    'create_task': 'создал задачу',
+                    'complete_task': 'выполнил задачу',
+                    'uncomplete_task': 'отменил выполнение'
+                };
+                
+                let html = '';
+                activity.forEach(a => {
+                    const dotClass = a.action.includes('create') ? 'create' : a.action.includes('complete') ? 'complete' : 'status';
+                    const time = new Date(a.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    
+                    html += `<div class="activity-item">
+                        <div class="activity-dot ${dotClass}"></div>
+                        <div class="activity-text">
+                            <div><strong>${a.user_name}</strong> ${actionLabels[a.action] || a.action}</div>
+                            ${a.details ? '<div class="text-sm text-muted">' + a.details + '</div>' : ''}
+                            ${a.project_name ? '<div class="text-sm"><a href="/pages/project.html?id=' + a.project_id + '" style="color:var(--primary);text-decoration:none;">' + a.project_name + '</a></div>' : ''}
+                            <div class="activity-time">${time}</div>
+                        </div>
+                    </div>`;
+                });
+                
+                document.getElementById('activityList').innerHTML = html;
+            } catch (err) {
+                document.getElementById('activityList').innerHTML = '<p class="text-muted text-sm">Ошибка загрузки</p>';
+            }
+        }
+        
+        await renderTasks();
+        await loadActivity();
+        
+        window.showNewTaskModal = function() {
+            const overlay = document.getElementById('modalOverlay');
+            let projectOptions = '';
+            CRM.getProjects().forEach(p => {
+                projectOptions += `<option value="${p.id}">${p.client} — ${p.name}</option>`;
+            });
+            
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Проект</label><select class="form-select" id="newTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
+                            <div class="form-group"><label class="form-label">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Дата</label><input type="text" class="form-input" id="newTaskDate" placeholder="25.07" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                        <div class="form-group"><label class="form-check"><input type="checkbox" id="newTaskUrgent" onclick="event.stopPropagation()"> Срочно</label></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+        
+        window.showAddSubtaskModal = function(taskId) {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Новая подзадача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Название *</label><input type="text" class="form-input" id="subtaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Ответственный</label><select class="form-select" id="subtaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label">Дедлайн</label><input type="text" class="form-input" id="subtaskDeadline" placeholder="25.07" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createSubtask('${taskId}')">Создать</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+        
+        window.createTask = async function() {
+            const name = document.getElementById('newTaskName').value.trim();
+            if (!name) { showToast('Введите название', 'error'); return; }
+            
+            try {
+                await CRM.addTask({
+                    project_id: document.getElementById('newTaskProject').value,
+                    name: name,
+                    column_status: 'Ожидает',
+                    person: document.getElementById('newTaskPerson').value,
+                    date: document.getElementById('newTaskDate').value || '—',
+                    time: document.getElementById('newTaskTime').value || '',
+                    done: false,
+                    urgent: document.getElementById('newTaskUrgent').checked,
+                    hashtags: []
+                });
+                
+                closeModal();
+                showToast('Задача создана', 'success');
+                await CRM.load();
+                await renderTasks();
+                await loadActivity();
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+        
+        window.createSubtask = async function(taskId) {
+            const name = document.getElementById('subtaskName').value.trim();
+            if (!name) { showToast('Введите название', 'error'); return; }
+            
+            try {
+                await API.createSubtask({
+                    task_id: taskId,
+                    name: name,
+                    person: document.getElementById('subtaskPerson').value,
+                    deadline: document.getElementById('subtaskDeadline').value || ''
+                });
+                
+                closeModal();
+                showToast('Подзадача создана', 'success');
+                await renderTasks();
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+    })();
+    </script>
+</body>
+</html>

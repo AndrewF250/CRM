@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Проект — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <div id="app"></div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+
+    <script src="/assets/js/api.js?v=3"></script>
+    <script src="/assets/js/app.js?v=3"></script>
+    <script src="/assets/js/crm-data.js?v=3"></script>
+    <script>
+    (async function() {
+        if (!API.requireAuth()) return;
+        
+        // Get project ID from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const projectId = urlParams.get('id');
+        
+        if (!projectId) {
+            window.location.href = '/pages/projects.html';
+            return;
+        }
+        
+        const app = document.getElementById('app');
+        app.innerHTML = renderSidebar('projects') + renderHeader() + `
+            <div id="projectContent">
+                <div style="text-align:center;padding:60px;"><p class="text-muted">Загрузка...</p></div>
+            </div>
+            </div></div></div>
+        `;
+        
+        initCommonUI();
+        await CRM.load();
+        
+        const project = CRM.getProject(projectId);
+        if (!project) {
+            document.getElementById('projectContent').innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:60px;"><p class="text-muted">Проект не найден</p><a href="/pages/projects.html" class="btn btn-primary" style="margin-top:16px;">Вернуться к проектам</a></div></div>';
+            return;
+        }
+        
+        const tasks = CRM.getTasks(projectId);
+        const docs = await API.getDocuments(projectId);
+        const calls = await API.getCalls(projectId);
+        
+        // Status colors
+        const statusColors = { 'Новый': 'badge-primary', 'Переговоры': 'badge-warning', 'В работе': 'badge-success', 'Абонемент': 'badge-info', 'Выполнено': 'badge-gray' };
+        const payIcons = { 'unpaid': 'unpaid', 'pending': 'pending', 'paid': 'paid' };
+        const adeqEmoji = { 'good': '😊', 'warn': '😐', 'bad': '😡' };
+        const adeqLabel = { 'good': 'Нормальный', 'warn': 'Осторожно', 'bad': 'Не работаем' };
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return '—';
+            const parts = dateStr.split('-');
+            if (parts.length === 3) return `${parts[2]}.${parts[1]}.${parts[0]}`;
+            return dateStr;
+        }
+        
+        function isPaymentDueSoon(dateStr) {
+            if (!dateStr) return false;
+            const due = new Date(dateStr);
+            const now = new Date();
+            const diff = (due - now) / (1000 * 60 * 60 * 24);
+            return diff >= 0 && diff <= 3;
+        }
+        
+        // Kanban columns for tasks
+        const columns = [
+            { name: 'Готово', dot: 'gray', bg: 'var(--gray-100)' },
+            { name: 'В работе', dot: 'green', bg: 'var(--success-light)' },
+            { name: 'Согласуем', dot: 'yellow', bg: 'var(--warning-light)' },
+            { name: 'Ожидает', dot: 'gray', bg: 'var(--gray-100)' }
+        ];
+        
+        let kanbanHtml = '<div style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;">';
+        columns.forEach(col => {
+            const colTasks = tasks.filter(t => t.column_status === col.name);
+            kanbanHtml += `<div class="kanban-column" style="min-width:200px;flex:1;background:${col.bg};border-radius:var(--radius-lg);padding:12px;">
+                <div style="font-weight:700;font-size:0.85rem;color:var(--gray-600);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                    <span class="status-dot ${col.dot}"></span> ${col.name} <span class="kanban-count" style="background:var(--gray-300);color:var(--gray-700);font-size:0.6rem;padding:2px 6px;border-radius:var(--radius-full);">${colTasks.length}</span>
+                </div>
+                <div class="kanban-column-body" data-column="${col.name}" style="min-height:60px;">`;
+            
+            colTasks.forEach(t => {
+                kanbanHtml += `<div class="kanban-card" data-task-id="${t.id}" style="background:var(--white);border-radius:var(--radius-md);padding:10px;margin-bottom:8px;cursor:grab;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <input type="checkbox" ${t.done ? 'checked' : ''} style="width:14px;height:14px;" onchange="toggleTask('${t.id}', this.checked)">
+                        <span style="font-weight:600;font-size:0.85rem;${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</span>
+                    </div>
+                    <div style="font-size:0.7rem;color:var(--gray-500);margin-top:4px;">${t.person} · ${t.date || ''} ${t.time || ''}</div>
+                </div>`;
+            });
+            
+            kanbanHtml += '</div></div>';
+        });
+        kanbanHtml += '</div>';
+        
+        // Documents list
+        let docsHtml = '';
+        if (docs && docs.length > 0) {
+            docsHtml = '<div class="docs-list">';
+            docs.forEach(d => {
+                const colors = { PDF: '#EF4444', DOCX: '#3B82F6', XLSX: '#10B981', ZIP: '#F59E0B', PNG: '#8B5CF6' };
+                const color = colors[d.type] || '#6B7280';
+                docsHtml += `<div class="doc-item"><div style="display:flex;align-items:center;gap:12px;"><div style="width:36px;height:36px;border-radius:8px;background:${color}15;display:flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg></div><div><div class="fw-600">${d.name}</div><div class="text-sm text-muted">${d.type} · ${d.size || ''}</div></div></div><button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteDoc(${d.id})">Удалить</button></div>`;
+            });
+            docsHtml += '</div>';
+        } else {
+            docsHtml = '<p class="text-muted text-sm" style="padding:12px;">Нет документов</p>';
+        }
+        
+        // Calls list
+        let callsHtml = '';
+        if (calls && calls.length > 0) {
+            calls.forEach(c => {
+                callsHtml += `<div class="call-item"><div class="call-item-header"><span class="fw-600">Звонок</span><span class="call-item-date">${c.date}</span></div><div class="call-item-text">${c.text}</div></div>`;
+            });
+        } else {
+            callsHtml = '<p class="text-muted text-sm" style="padding:12px;">Нет звонков</p>';
+        }
+        
+        // Render project page
+        document.getElementById('projectContent').innerHTML = `
+            <div style="margin-bottom:12px;">
+                <a href="/pages/projects.html" class="text-sm text-muted" style="display:inline-flex;align-items:center;gap:4px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Проекты
+                </a>
+                <span class="text-sm text-muted" style="margin:0 8px;">/</span>
+                <span class="text-sm fw-600">${project.name} — ${project.client}</span>
+            </div>
+            
+            <div class="page-header">
+                <div>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <h1 class="page-title">${project.name}</h1>
+                        ${project.urgent ? '<span class="badge badge-danger">СРОЧНО</span>' : ''}
+                        <span class="badge ${statusColors[project.status] || 'badge-gray'}">${project.status}</span>
+                        <span class="pay-icon ${payIcons[project.pay_status] || 'unpaid'}" title="${project.pay_status}">$</span>
+                        <span class="adequacy-icon ${project.adequacy || 'good'}" title="${adeqLabel[project.adequacy] || 'Нормальный'}">${adeqEmoji[project.adequacy] || '😊'}</span>
+                    </div>
+                    <p class="page-subtitle" style="margin-top:6px;"><strong>${project.client}</strong> · Дедлайн: ${project.deadline || '—'}${project.payment_due_date ? ' · Оплата: ' + formatDate(project.payment_due_date) : ''}</p>
+                    <div class="hashtags" style="margin-top:6px;">${(project.hashtags || []).map(h => '<span class="hashtag">' + h + '</span>').join('')}</div>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-secondary" onclick="editProject()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Редактировать</button>
+                    <button class="btn btn-danger" onclick="deleteProject()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg> Удалить</button>
+                </div>
+            </div>
+            
+            <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));">
+                <div class="stat-card"><div class="stat-info"><div class="stat-label">Сумма</div><div class="stat-value" style="font-size:1.3rem;">${formatAmount(project.amount)}</div></div></div>
+                <div class="stat-card"><div class="stat-info"><div class="stat-label">Статус</div><div style="margin-top:4px;"><span class="badge ${statusColors[project.status]}">${project.status}</span></div></div></div>
+                <div class="stat-card"><div class="stat-info"><div class="stat-label">Оплата</div><div style="display:flex;align-items:center;gap:8px;margin-top:4px;"><span class="pay-icon ${payIcons[project.pay_status]}">$</span><span class="fw-600">${project.pay_method || 'По счёту'}</span></div></div></div>
+                <div class="stat-card"><div class="stat-info"><div class="stat-label">Источник</div><div style="margin-top:6px;"><span class="source-tag">${project.source || '—'}</span></div></div></div>
+                <div class="stat-card"><div class="stat-info"><div class="stat-label">Дата оплаты</div><div style="margin-top:6px;font-weight:600;${isPaymentDueSoon(project.payment_due_date) ? 'color:var(--danger);' : ''}">${project.payment_due_date ? formatDate(project.payment_due_date) : '—'}</div></div></div>
+            </div>
+            
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><h3 class="card-title">Описание</h3></div>
+                <div class="card-body"><p style="font-size:0.9rem;color:var(--gray-700);line-height:1.6;">${project.description || 'Нет описания'}</p></div>
+            </div>
+            
+            <div class="card" style="margin-bottom:24px;">
+                <div class="card-body">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <span class="fw-600">Прогресс</span>
+                        <span class="fw-600 text-primary">${project.progress || 0}%</span>
+                    </div>
+                    <div class="progress-bar"><div class="progress-fill" style="width:${project.progress || 0}%;"></div></div>
+                </div>
+            </div>
+            
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="tabTasks">Задачи</button>
+                <button class="tab-btn" data-tab="tabDocs">Документы</button>
+                <button class="tab-btn" data-tab="tabCalls">Звонки</button>
+                <button class="tab-btn" data-tab="tabAccess">Доступы</button>
+            </div>
+            
+            <div class="tab-content active" id="tabTasks">
+                <div style="margin-bottom:12px;display:flex;gap:8px;">
+                    <button class="btn btn-primary btn-sm" onclick="showAddTaskModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Добавить задачу</button>
+                </div>
+                ${kanbanHtml}
+            </div>
+            
+            <div class="tab-content" id="tabDocs">
+                <div style="margin-bottom:12px;display:flex;gap:8px;">
+                    <button class="btn btn-primary btn-sm" onclick="showUploadDocModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Загрузить файл</button>
+                </div>
+                ${docsHtml}
+            </div>
+            
+            <div class="tab-content" id="tabCalls">
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Записи звонков</h3><span class="badge badge-gray">Скоро</span></div>
+                    <div class="card-body">${callsHtml}</div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="tabAccess">
+                <div class="card" style="border:2px solid var(--primary);">
+                    <div class="card-header" style="background:var(--primary-light);">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                            <span class="card-title" style="color:var(--primary);">Доступы к проекту</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="cred-block"><span class="cred-label">Статус</span><span class="cred-value">${project.status}</span></div>
+                        <div class="cred-block"><span class="cred-label">Клиент</span><span class="cred-value">${project.client}</span></div>
+                        <div class="cred-block"><span class="cred-label">Сумма</span><span class="cred-value">${formatAmount(project.amount)}</span></div>
+                        <div class="cred-block"><span class="cred-label">Дедлайн</span><span class="cred-value">${project.deadline || '—'}</span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Init tabs
+        document.querySelectorAll('.tabs').forEach(group => {
+            const btns = group.querySelectorAll('.tab-btn');
+            btns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const target = btn.dataset.tab;
+                    if (!target) return;
+                    btns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    const el = document.getElementById(target);
+                    if (el) el.classList.add('active');
+                });
+            });
+        });
+        
+        // Init kanban drag and drop for tasks
+        initKanban();
+        
+        // Toggle task done
+        window.toggleTask = async function(taskId, done) {
+            try {
+                await CRM.updateTask(taskId, { done: done, column_status: done ? 'Готово' : 'В работе' });
+                showToast(done ? 'Выполнено' : 'В работе', 'success');
+                setTimeout(() => location.reload(), 500);
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+        
+        // Delete project
+        window.deleteProject = async function() {
+            if (!confirm('Удалить проект и все его задачи?')) return;
+            try {
+                await API.deleteProject(projectId);
+                showToast('Проект удалён', 'success');
+                window.location.href = '/pages/projects.html';
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+        
+        // Delete document
+        window.deleteDoc = async function(id) {
+            if (!confirm('Удалить документ?')) return;
+            try {
+                await API.deleteDocument(id);
+                showToast('Документ удалён', 'success');
+                setTimeout(() => location.reload(), 500);
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+        
+        // Edit project modal
+        window.editProject = function() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal modal-lg" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Редактировать — ${project.name}</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Название</label><input type="text" class="form-input" id="editName" value="${project.name}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Клиент</label><input type="text" class="form-input" id="editClient" value="${project.client}" onclick="event.stopPropagation()"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Статус</label><select class="form-select" id="editStatus" onclick="event.stopPropagation()"><option${project.status==='Новый'?' selected':''}>Новый</option><option${project.status==='Переговоры'?' selected':''}>Переговоры</option><option${project.status==='В работе'?' selected':''}>В работе</option><option${project.status==='Абонемент'?' selected':''}>Абонемент</option><option${project.status==='Выполнено'?' selected':''}>Выполнено</option></select></div>
+                            <div class="form-group"><label class="form-label">Сумма (₽)</label><input type="number" class="form-input" id="editAmount" value="${project.amount}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Дедлайн</label><input type="text" class="form-input" id="editDeadline" value="${project.deadline || ''}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Дата оплаты</label><input type="date" class="form-input" id="editPayDate" value="${project.payment_due_date || ''}" onclick="event.stopPropagation()"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Оплата</label><select class="form-select" id="editPayStatus" onclick="event.stopPropagation()"><option value="unpaid"${project.pay_status==='unpaid'?' selected':''}>Не оплачено</option><option value="pending"${project.pay_status==='pending'?' selected':''}>Ждём</option><option value="paid"${project.pay_status==='paid'?' selected':''}>Оплачено</option></select></div>
+                            <div class="form-group"><label class="form-label">Способ</label><select class="form-select" id="editPayMethod" onclick="event.stopPropagation()"><option${project.pay_method==='Наличные'?' selected':''}>Наличные</option><option${project.pay_method==='По счёту'?' selected':''}>По счёту</option><option${project.pay_method==='Рассрочка'?' selected':''}>Рассрочка</option></select></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Адекватность</label><select class="form-select" id="editAdequacy" onclick="event.stopPropagation()"><option value="good"${project.adequacy==='good'?' selected':''}>Нормальный</option><option value="warn"${project.adequacy==='warn'?' selected':''}>Осторожно</option><option value="bad"${project.adequacy==='bad'?' selected':''}>Не работаем</option></select></div>
+                            <div class="form-group"><label class="form-label">Источник</label><select class="form-select" id="editSource" onclick="event.stopPropagation()"><option${project.source==='Сайт'?' selected':''}>Сайт</option><option${project.source==='Авито'?' selected':''}>Авито</option><option${project.source==='Telegram'?' selected':''}>Telegram</option><option${project.source==='Реклама'?' selected':''}>Реклама</option><option${project.source==='Знакомые'?' selected':''}>Знакомые</option></select></div>
+                        </div>
+                        <div class="form-group"><label class="form-label">Описание</label><textarea class="form-textarea" id="editDescription" onclick="event.stopPropagation()">${project.description || ''}</textarea></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="saveProject()">Сохранить</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+        
+        window.saveProject = async function() {
+            try {
+                await API.updateProject(projectId, {
+                    name: document.getElementById('editName').value,
+                    client: document.getElementById('editClient').value,
+                    status: document.getElementById('editStatus').value,
+                    amount: parseInt(document.getElementById('editAmount').value) || 0,
+                    deadline: document.getElementById('editDeadline').value,
+                    payment_due_date: document.getElementById('editPayDate').value || '',
+                    pay_status: document.getElementById('editPayStatus').value,
+                    pay_method: document.getElementById('editPayMethod').value,
+                    adequacy: document.getElementById('editAdequacy').value,
+                    source: document.getElementById('editSource').value,
+                    description: document.getElementById('editDescription').value,
+                    urgent: project.urgent,
+                    progress: project.progress,
+                    discount: project.discount,
+                    discount_val: project.discount_val,
+                    work_types: project.work_types,
+                    hashtags: project.hashtags
+                });
+                closeModal();
+                showToast('Проект обновлён', 'success');
+                setTimeout(() => location.reload(), 500);
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+        
+        // Add task modal
+        window.showAddTaskModal = function() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label">Дата</label><input type="text" class="form-input" id="newTaskDate" placeholder="25.07" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addTask()">Создать</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+        
+        window.addTask = async function() {
+            const name = document.getElementById('newTaskName').value.trim();
+            if (!name) { showToast('Введите название', 'error'); return; }
+            
+            try {
+                await CRM.addTask({
+                    project_id: projectId,
+                    name: name,
+                    column_status: 'Ожидает',
+                    person: document.getElementById('newTaskPerson').value,
+                    date: document.getElementById('newTaskDate').value || '—',
+                    time: document.getElementById('newTaskTime').value || '',
+                    done: false,
+                    urgent: false,
+                    hashtags: []
+                });
+                closeModal();
+                showToast('Задача создана', 'success');
+                setTimeout(() => location.reload(), 500);
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+        
+        // Upload document modal
+        window.showUploadDocModal = function() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Загрузить файл</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Название файла *</label><input type="text" class="form-input" id="docName" placeholder="Договор.pdf" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Тип</label><select class="form-select" id="docType" onclick="event.stopPropagation()"><option>PDF</option><option>DOCX</option><option>XLSX</option><option>ZIP</option><option>PNG</option></select></div>
+                            <div class="form-group"><label class="form-label">Размер</label><input type="text" class="form-input" id="docSize" placeholder="245 KB" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Файл</label>
+                            <div style="border:2px dashed var(--gray-300);border-radius:12px;padding:32px;text-align:center;cursor:pointer;" onclick="document.getElementById('fileInput').click()" ondragover="event.preventDefault();this.style.borderColor='var(--primary)'" ondragleave="this.style.borderColor='var(--gray-300)'" ondrop="event.preventDefault();this.style.borderColor='var(--gray-300)';handleFileDrop(event)">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" stroke-width="1.5" style="margin:0 auto 8px;display:block;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                <p class="fw-600 text-muted" id="fileLabel">Нажмите или перетащите файл</p>
+                            </div>
+                            <input type="file" id="fileInput" style="display:none" onchange="handleFileSelect(this)">
+                        </div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="uploadDocument()">Загрузить</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+        
+        let selectedFile = null;
+        
+        window.handleFileSelect = function(input) {
+            if (input.files.length > 0) {
+                selectedFile = input.files[0];
+                document.getElementById('fileLabel').textContent = selectedFile.name;
+                // Auto-fill name and type
+                const nameInput = document.getElementById('docName');
+                if (!nameInput.value) nameInput.value = selectedFile.name;
+                const ext = selectedFile.name.split('.').pop().toUpperCase();
+                const typeSelect = document.getElementById('docType');
+                if (['PDF','DOCX','XLSX','ZIP','PNG','JPG','JPEG'].includes(ext)) {
+                    typeSelect.value = ext;
+                }
+            }
+        };
+        
+        window.handleFileDrop = function(e) {
+            if (e.dataTransfer.files.length > 0) {
+                selectedFile = e.dataTransfer.files[0];
+                document.getElementById('fileLabel').textContent = selectedFile.name;
+                const nameInput = document.getElementById('docName');
+                if (!nameInput.value) nameInput.value = selectedFile.name;
+            }
+        };
+        
+        window.uploadDocument = async function() {
+            const name = document.getElementById('docName').value.trim();
+            if (!name) { showToast('Введите название файла', 'error'); return; }
+            
+            try {
+                // If we have a real file, upload it
+                if (selectedFile) {
+                    const formData = new FormData();
+                    formData.append('file', selectedFile);
+                    formData.append('project_id', projectId);
+                    formData.append('name', name);
+                    formData.append('type', document.getElementById('docType').value);
+                    formData.append('size', document.getElementById('docSize').value || formatFileSize(selectedFile.size));
+                    
+                    await fetch('/api/documents/upload', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${API.token}` },
+                        body: formData
+                    });
+                } else {
+                    // Just add document record
+                    await API.addDocument({
+                        project_id: projectId,
+                        name: name,
+                        type: document.getElementById('docType').value,
+                        size: document.getElementById('docSize').value || ''
+                    });
+                }
+                
+                closeModal();
+                showToast('Документ загружен', 'success');
+                setTimeout(() => location.reload(), 500);
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'error');
+            }
+        };
+        
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+            return Math.round(bytes / (1024 * 1024)) + ' MB';
+        }
+    })();
+    </script>
+</body>
+</html>

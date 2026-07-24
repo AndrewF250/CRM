@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Деньги — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+    <style>
+        .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 2px solid var(--gray-200); padding-bottom: 0; }
+        .tab { padding: 10px 20px; cursor: pointer; font-weight: 500; color: var(--gray-500); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; }
+        .tab:hover { color: var(--gray-700); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 20px; }
+        .stat-label { font-size: 0.85rem; color: var(--gray-500); margin-bottom: 4px; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-value.income { color: var(--success); }
+        .stat-value.expense { color: var(--danger); }
+        .expense-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .expense-info { flex: 1; }
+        .expense-category { display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 500; margin-bottom: 4px; }
+        .expense-category.salary { background: #dbeafe; color: #1e40af; }
+        .expense-category.equipment { background: #fef3c7; color: #92400e; }
+        .expense-category.service { background: #d1fae5; color: #065f46; }
+        .expense-category.other { background: #f3f4f6; color: #374151; }
+        .expense-desc { font-weight: 500; }
+        .expense-meta { font-size: 0.8rem; color: var(--gray-500); margin-top: 2px; }
+        .expense-amount { font-size: 1.1rem; font-weight: 600; white-space: nowrap; }
+        .expense-amount.negative { color: var(--danger); }
+        .salary-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
+        .salary-row:last-child { border-bottom: none; }
+        .salary-user { display: flex; align-items: center; gap: 10px; flex: 1; }
+        .salary-status { padding: 4px 10px; border-radius: var(--radius-sm); font-size: 0.8rem; font-weight: 500; }
+        .salary-status.paid { background: #d1fae5; color: #065f46; }
+        .salary-status.unpaid { background: #fef3c7; color: #92400e; }
+        .month-selector { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+        .month-selector input { padding: 8px 12px; border: 1px solid var(--gray-300); border-radius: var(--radius-md); font-size: 0.9rem; }
+        .category-breakdown { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 16px; }
+        .category-item { display: flex; align-items: center; gap: 8px; }
+        .category-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .category-name { font-size: 0.85rem; color: var(--gray-600); }
+        .category-amount { font-weight: 600; margin-left: auto; }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+
+    <script src="/assets/js/api.js?v=6"></script>
+    <script src="/assets/js/app.js?v=6"></script>
+    <script>
+    (async function() {
+        if (!API.requireAuth()) return;
+        
+        const app = document.getElementById('app');
+        let currentTab = 'expenses';
+        let currentMonth = new Date().toISOString().slice(0, 7);
+        let expenses = [];
+        let salaries = [];
+        let expenseStats = { categories: [], total: 0 };
+
+        function render() {
+            app.innerHTML = renderSidebar('money') + renderHeader() + `
+                <div class="page-header">
+                    <div><h1 class="page-title">Деньги</h1><p class="page-subtitle">Управление финансами</p></div>
+                    <div class="page-actions">
+                        <button class="btn btn-secondary" onclick="showAddSalaryModal()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                            Зарплата
+                        </button>
+                        <button class="btn btn-primary" onclick="showAddExpenseModal()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Расход
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tabs">
+                    <div class="tab ${currentTab === 'expenses' ? 'active' : ''}" onclick="switchTab('expenses')">Расходы</div>
+                    <div class="tab ${currentTab === 'salaries' ? 'active' : ''}" onclick="switchTab('salaries')">Зарплаты</div>
+                    <div class="tab ${currentTab === 'stats' ? 'active' : ''}" onclick="switchTab('stats')">Статистика</div>
+                </div>
+
+                <div class="month-selector">
+                    <label>Месяц:</label>
+                    <input type="month" id="monthPicker" value="${currentMonth}" onchange="changeMonth(this.value)">
+                </div>
+
+                <div id="tabContent"></div>
+            `;
+            
+            renderTabContent();
+            initCommonUI();
+        }
+
+        function renderTabContent() {
+            const container = document.getElementById('tabContent');
+            if (currentTab === 'expenses') {
+                container.innerHTML = renderExpensesTab();
+            } else if (currentTab === 'salaries') {
+                container.innerHTML = renderSalariesTab();
+            } else {
+                container.innerHTML = renderStatsTab();
+            }
+        }
+
+        function renderExpensesTab() {
+            if (expenses.length === 0) {
+                return '<div class="empty-state"><p>Нет расходов за этот месяц</p></div>';
+            }
+            return expenses.map(e => `
+                <div class="expense-card">
+                    <div class="expense-info">
+                        <span class="expense-category ${getCategoryClass(e.category)}">${e.category}</span>
+                        <div class="expense-desc">${e.description}</div>
+                        <div class="expense-meta">${e.date} ${e.person ? '· ' + e.person : ''} ${e.note ? '· ' + e.note : ''}</div>
+                    </div>
+                    <div class="expense-amount negative">-${formatMoney(e.amount)} ₽</div>
+                    <button class="btn btn-sm btn-ghost" onclick="deleteExpense(${e.id})" title="Удалить">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function renderSalariesTab() {
+            if (salaries.length === 0) {
+                return '<div class="empty-state"><p>Нет зарплат за этот месяц</p></div>';
+            }
+            return `<div class="card"><div class="card-body">
+                ${salaries.map(s => `
+                    <div class="salary-row">
+                        <div class="salary-user">
+                            <div class="user-avatar" style="width:36px;height:36px;font-size:0.7rem;">${getInitials(s.user_name)}</div>
+                            <div>
+                                <div style="font-weight:500;">${s.user_name}</div>
+                                <div style="font-size:0.8rem;color:var(--gray-500);">${s.note || 'Зарплата'}</div>
+                            </div>
+                        </div>
+                        <div style="font-weight:600;font-size:1.1rem;">${formatMoney(s.amount)} ₽</div>
+                        <span class="salary-status ${s.paid ? 'paid' : 'unpaid'}">${s.paid ? 'Выплачено' : 'Не выплачено'}</span>
+                        <button class="btn btn-sm ${s.paid ? 'btn-secondary' : 'btn-success'}" onclick="toggleSalaryPaid(${s.id}, ${!s.paid})">
+                            ${s.paid ? 'Отменить' : 'Оплатить'}
+                        </button>
+                        <button class="btn btn-sm btn-ghost" onclick="deleteSalary(${s.id})" title="Удалить">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        </button>
+                    </div>
+                `).join('')}
+            </div></div>`;
+        }
+
+        function renderStatsTab() {
+            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+            return `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Всего расходов</div>
+                        <div class="stat-value expense">${formatMoney(expenseStats.total)} ₽</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Зарплаты</div>
+                        <div class="stat-value">${formatMoney(salaries.reduce((sum, s) => sum + s.amount, 0))} ₽</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Выплачено</div>
+                        <div class="stat-value income">${formatMoney(salaries.filter(s => s.paid).reduce((sum, s) => sum + s.amount, 0))} ₽</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Расходы по категориям</h3></div>
+                    <div class="card-body">
+                        <div class="category-breakdown">
+                            ${expenseStats.categories.map((c, i) => `
+                                <div class="category-item">
+                                    <div class="category-dot" style="background:${colors[i % colors.length]}"></div>
+                                    <span class="category-name">${c.category}</span>
+                                    <span class="category-amount">${formatMoney(c.total)} ₽</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getCategoryClass(cat) {
+            const map = { 'Зарплата': 'salary', 'Оборудование': 'equipment', 'Сервисы': 'service' };
+            return map[cat] || 'other';
+        }
+
+        function getInitials(name) {
+            return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '??';
+        }
+
+        function formatMoney(amount) {
+            return new Intl.NumberFormat('ru-RU').format(amount);
+        }
+
+        // Tab switching
+        window.switchTab = function(tab) {
+            currentTab = tab;
+            render();
+        };
+
+        window.changeMonth = function(month) {
+            currentMonth = month;
+            loadData();
+        };
+
+        // Load data
+        async function loadData() {
+            try {
+                const [expRes, salRes, statsRes] = await Promise.all([
+                    API.get(`/api/expenses?month=${currentMonth}`),
+                    API.get(`/api/salaries?month=${currentMonth}`),
+                    API.get(`/api/expenses/stats?month=${currentMonth}`)
+                ]);
+                expenses = expRes;
+                salaries = salRes;
+                expenseStats = statsRes;
+                renderTabContent();
+            } catch (err) {
+                console.error('Failed to load data:', err);
+            }
+        }
+
+        // Add expense modal
+        window.showAddExpenseModal = function() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Новый расход</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Категория *</label>
+                            <select class="form-select" id="expenseCategory">
+                                <option>Зарплата</option>
+                                <option>Оборудование</option>
+                                <option>Сервисы</option>
+                                <option>Реклама</option>
+                                <option>Аренда</option>
+                                <option>Связь</option>
+                                <option>Транспорт</option>
+                                <option>Питание</option>
+                                <option>Прочее</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label class="form-label">Описание *</label><input type="text" class="form-input" id="expenseDesc" placeholder="На что потрачено?"></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Сумма *</label><input type="number" class="form-input" id="expenseAmount" placeholder="0"></div>
+                            <div class="form-group"><label class="form-label">Дата *</label><input type="date" class="form-input" id="expenseDate" value="${new Date().toISOString().split('T')[0]}"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Кто</label>
+                                <select class="form-select" id="expensePerson">
+                                    <option value="">-</option>
+                                    <option>Костя</option>
+                                    <option>Максим</option>
+                                    <option>Андрей</option>
+                                </select>
+                            </div>
+                            <div class="form-group"><label class="form-label">Примечание</label><input type="text" class="form-input" id="expenseNote" placeholder="Доп. информация"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addExpense()">Добавить</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+
+        // Add salary modal
+        window.showAddSalaryModal = function() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Новая зарплата</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Сотрудник *</label>
+                            <select class="form-select" id="salaryUser">
+                                <option>Костя</option>
+                                <option>Максим</option>
+                                <option>Андрей</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Сумма *</label><input type="number" class="form-input" id="salaryAmount" placeholder="0"></div>
+                            <div class="form-group"><label class="form-label">Месяц *</label><input type="month" class="form-input" id="salaryMonth" value="${currentMonth}"></div>
+                        </div>
+                        <div class="form-group"><label class="form-label">Примечание</label><input type="text" class="form-input" id="salaryNote" placeholder="Доп. информация"></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addSalary()">Добавить</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+
+        // CRUD operations
+        window.addExpense = async function() {
+            const category = document.getElementById('expenseCategory').value;
+            const description = document.getElementById('expenseDesc').value.trim();
+            const amount = parseFloat(document.getElementById('expenseAmount').value);
+            const date = document.getElementById('expenseDate').value;
+            const person = document.getElementById('expensePerson').value;
+            const note = document.getElementById('expenseNote').value.trim();
+
+            if (!description || !amount || !date) {
+                alert('Заполните обязательные поля');
+                return;
+            }
+
+            try {
+                await API.post('/api/expenses', { category, description, amount, date, person, note });
+                closeModal();
+                loadData();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        };
+
+        window.addSalary = async function() {
+            const user_name = document.getElementById('salaryUser').value;
+            const amount = parseFloat(document.getElementById('salaryAmount').value);
+            const month = document.getElementById('salaryMonth').value;
+            const note = document.getElementById('salaryNote').value.trim();
+
+            if (!amount || !month) {
+                alert('Заполните обязательные поля');
+                return;
+            }
+
+            try {
+                await API.post('/api/salaries', { user_name, amount, month, note });
+                closeModal();
+                loadData();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        };
+
+        window.toggleSalaryPaid = async function(id, paid) {
+            const salary = salaries.find(s => s.id === id);
+            if (!salary) return;
+
+            try {
+                await API.put(`/api/salaries/${id}`, { ...salary, paid });
+                loadData();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        };
+
+        window.deleteExpense = async function(id) {
+            if (!confirm('Удалить расход?')) return;
+            try {
+                await API.delete(`/api/expenses/${id}`);
+                loadData();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        };
+
+        window.deleteSalary = async function(id) {
+            if (!confirm('Удалить запись о зарплате?')) return;
+            try {
+                await API.delete(`/api/salaries/${id}`);
+                loadData();
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        };
+
+        // Initial load
+        await loadData();
+        render();
+    })();
+    </script>
+</body>
+</html>
