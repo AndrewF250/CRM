@@ -8,11 +8,11 @@ const db = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3005;
 
-// Users database
+// Users database (replace with your own credentials)
 const users = [
-  { id: 1, username: 'Костя', password: 'kostya2026', name: 'Костя', role: 'admin', avatar: 'КИ' },
-  { id: 2, username: 'Максим', password: 'maxim2026', name: 'Максим', role: 'admin', avatar: 'МИ' },
-  { id: 3, username: 'Андрей', password: 'andrey2026', name: 'Андрей', role: 'admin', avatar: 'АН' }
+  { id: 1, username: 'user1', password: 'CHANGE_ME_1', name: 'User 1', role: 'admin', avatar: 'U1' },
+  { id: 2, username: 'user2', password: 'CHANGE_ME_2', name: 'User 2', role: 'admin', avatar: 'U2' },
+  { id: 3, username: 'user3', password: 'CHANGE_ME_3', name: 'User 3', role: 'admin', avatar: 'U3' }
 ];
 
 // Create sessions table if not exists
