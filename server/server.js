@@ -122,7 +122,7 @@ app.get('/api/projects', requireAuth, (req, res) => {
       projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
     }
     // Get team members for each project from tasks
-    const teamStmt = db.prepare('SELECT DISTINCT person FROM tasks WHERE project_id = ? AND person != ""');
+    const teamStmt = db.prepare("SELECT DISTINCT person FROM tasks WHERE project_id = ? AND person != ''");
     res.json(projects.map(p => ({
       ...p,
       urgent: !!p.urgent,
@@ -138,7 +138,7 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
   try {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    const team = db.prepare('SELECT DISTINCT person FROM tasks WHERE project_id = ? AND person != ""').all(req.params.id).map(r => r.person);
+    const team = db.prepare("SELECT DISTINCT person FROM tasks WHERE project_id = ? AND person != ''").all(req.params.id).map(r => r.person);
     res.json({ ...project, urgent: !!project.urgent, hashtags: JSON.parse(project.hashtags || '[]'), team });
   } catch (err) {
     res.status(500).json({ error: err.message });
