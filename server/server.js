@@ -121,10 +121,13 @@ app.get('/api/projects', requireAuth, (req, res) => {
     } else {
       projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
     }
+    // Get team members for each project from tasks
+    const teamStmt = db.prepare('SELECT DISTINCT person FROM tasks WHERE project_id = ? AND person != ""');
     res.json(projects.map(p => ({
       ...p,
       urgent: !!p.urgent,
-      hashtags: JSON.parse(p.hashtags || '[]')
+      hashtags: JSON.parse(p.hashtags || '[]'),
+      team: teamStmt.all(p.id).map(r => r.person)
     })));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -135,7 +138,8 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
   try {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    res.json({ ...project, urgent: !!project.urgent, hashtags: JSON.parse(project.hashtags || '[]') });
+    const team = db.prepare('SELECT DISTINCT person FROM tasks WHERE project_id = ? AND person != ""').all(req.params.id).map(r => r.person);
+    res.json({ ...project, urgent: !!project.urgent, hashtags: JSON.parse(project.hashtags || '[]'), team });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -257,13 +261,21 @@ app.get('/api/tasks', requireAuth, (req, res) => {
 
 app.post('/api/tasks', requireAuth, (req, res) => {
   try {
-    const { id, project_id, name, column_status, person, date, time, done, urgent, hashtags } = req.body;
+    const { id, project_id, name, column_status, person, date, time, done, urgent, hashtags, parent_id } = req.body;
     const taskId = id || 'task_' + Date.now();
     
-    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, time, done, urgent, hashtags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    // Validate parent_id
+    if (parent_id) {
+      if (parent_id === taskId) return res.status(400).json({ error: 'Задача не может быть подзадачей самой себя' });
+      const parent = db.prepare('SELECT * FROM tasks WHERE id = ?').get(parent_id);
+      if (!parent) return res.status(400).json({ error: 'Родительская задача не найдена' });
+      if (parent.project_id !== project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
+    }
+    
+    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, time, done, urgent, hashtags, parent_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       taskId, project_id, name, column_status || 'Ожидает', person || 'Костя',
-      date, time, done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || [])
+      date, time, done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null
     );
     
     updateProjectProgress(project_id);
@@ -278,14 +290,30 @@ app.post('/api/tasks', requireAuth, (req, res) => {
 
 app.put('/api/tasks/:id', requireAuth, (req, res) => {
   try {
-    const { name, column_status, person, date, time, done, urgent, hashtags } = req.body;
+    const { name, column_status, person, date, time, done, urgent, hashtags, parent_id } = req.body;
     
     const old = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Задача не найдена' });
     
-    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, time=?, done=?, urgent=?, hashtags=?, updated_at=CURRENT_TIMESTAMP
+    // Validate parent_id if changing
+    const newParentId = parent_id !== undefined ? (parent_id || null) : old.parent_id;
+    if (newParentId) {
+      if (newParentId === req.params.id) return res.status(400).json({ error: 'Задача не может быть подзадачей самой себя' });
+      // Check for cycle: walk up the parent chain
+      let checkId = newParentId;
+      while (checkId) {
+        if (checkId === req.params.id) return res.status(400).json({ error: 'Нельзя создать цикл вложенности' });
+        const p = db.prepare('SELECT parent_id FROM tasks WHERE id = ?').get(checkId);
+        checkId = p ? p.parent_id : null;
+      }
+      const parent = db.prepare('SELECT * FROM tasks WHERE id = ?').get(newParentId);
+      if (parent && parent.project_id !== old.project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
+    }
+    
+    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?`).run(
       name, column_status, person, date, time, done ? 1 : 0, urgent ? 1 : 0,
-      JSON.stringify(hashtags || []), req.params.id
+      JSON.stringify(hashtags || []), newParentId, req.params.id
     );
     
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
@@ -318,6 +346,61 @@ function updateProjectProgress(projectId) {
   const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
   db.prepare('UPDATE projects SET progress = ? WHERE id = ?').run(progress, projectId);
 }
+
+// ==================== KANBAN COLUMNS API ====================
+
+app.get('/api/kanban-columns', requireAuth, (req, res) => {
+  try {
+    const columns = db.prepare('SELECT * FROM kanban_columns ORDER BY sort_order').all();
+    res.json(columns);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/kanban-columns', requireAuth, (req, res) => {
+  try {
+    const { name, color } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
+    const maxOrder = db.prepare('SELECT MAX(sort_order) as max FROM kanban_columns').get();
+    const sortOrder = (maxOrder.max || 0) + 1;
+    const result = db.prepare('INSERT INTO kanban_columns (name, color, sort_order) VALUES (?, ?, ?)').run(name.trim(), color || 'blue', sortOrder);
+    const column = db.prepare('SELECT * FROM kanban_columns WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(column);
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Колонка с таким названием уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/kanban-columns/:id', requireAuth, (req, res) => {
+  try {
+    const { name, color, sort_order } = req.body;
+    const existing = db.prepare('SELECT * FROM kanban_columns WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Колонка не найдена' });
+    db.prepare('UPDATE kanban_columns SET name = ?, color = ?, sort_order = ? WHERE id = ?').run(
+      name || existing.name, color || existing.color, sort_order !== undefined ? sort_order : existing.sort_order, req.params.id
+    );
+    const column = db.prepare('SELECT * FROM kanban_columns WHERE id = ?').get(req.params.id);
+    res.json(column);
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Колонка с таким названием уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/kanban-columns/:id', requireAuth, (req, res) => {
+  try {
+    const column = db.prepare('SELECT * FROM kanban_columns WHERE id = ?').get(req.params.id);
+    if (!column) return res.status(404).json({ error: 'Колонка не найдена' });
+    const projectsUsing = db.prepare('SELECT COUNT(*) as count FROM projects WHERE status = ?').get(column.name);
+    if (projectsUsing.count > 0) return res.status(400).json({ error: `В колонке "${column.name}" ${projectsUsing.count} проектов. Сначала переместите их.` });
+    db.prepare('DELETE FROM kanban_columns WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ==================== SUBTASKS API ====================
 

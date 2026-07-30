@@ -3,6 +3,34 @@
  * Full CRUD functionality with API backend
  */
 
+// ==================== DARK MODE ====================
+function initTheme() {
+    const saved = localStorage.getItem('crm_theme');
+    if (saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+    }
+}
+
+function toggleTheme() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('crm_theme', 'light');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('crm_theme', 'dark');
+    }
+    // Re-render header to update icon
+    const headerEl = document.querySelector('.header');
+    if (headerEl) {
+        const wrapper = headerEl.parentElement;
+        if (wrapper) {
+            wrapper.outerHTML = renderHeader();
+            initCommonUI();
+        }
+    }
+}
+
 // ==================== SIDEBAR COMPONENT ====================
 function renderSidebar(activePage) {
     const user = API.getCurrentUser();
@@ -80,7 +108,8 @@ function renderSidebar(activePage) {
 function renderHeader() {
     const user = API.getCurrentUser();
     const avatar = user ? user.avatar : 'АИ';
-    
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
     return `
     <div class="main-wrapper">
         <header class="header">
@@ -90,12 +119,18 @@ function renderHeader() {
                 </button>
                 <div class="header-search">
                     <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <input type="text" class="search-input" placeholder="Поиск...">
+                    <input type="text" class="search-input" placeholder="Поиск..." aria-label="Поиск">
                 </div>
             </div>
             <div class="header-right">
+                <button class="header-icon-btn" onclick="toggleTheme()" title="${isDark ? 'Светлая тема' : 'Тёмная тема'}" aria-label="${isDark ? 'Светлая тема' : 'Тёмная тема'}">
+                    ${isDark
+                        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+                        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>'
+                    }
+                </button>
                 <div class="header-notifications">
-                    <button class="header-icon-btn" id="notifBtn" title="Уведомления">
+                    <button class="header-icon-btn" id="notifBtn" title="Уведомления" aria-label="Уведомления">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
                         <span class="notif-badge" id="notifBadge">0</span>
                     </button>
@@ -105,7 +140,7 @@ function renderHeader() {
                     </div>
                 </div>
                 <div class="header-user-menu">
-                    <button class="header-user-btn" id="userMenuBtn"><div class="header-avatar">${avatar}</div></button>
+                    <button class="header-user-btn" id="userMenuBtn" aria-label="Меню пользователя"><div class="header-avatar">${avatar}</div></button>
                     <div class="user-dropdown" id="userDropdown">
                         <a href="/pages/settings.html" class="dropdown-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg> Настройки</a>
                         <div class="dropdown-divider"></div>
@@ -124,10 +159,24 @@ function initCommonUI() {
     const toggle = document.getElementById('sidebarToggle');
     const sidebar = document.getElementById('sidebar');
     if (toggle && sidebar) {
-        toggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+        // Create overlay for mobile
+        const overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        document.body.appendChild(overlay);
+
+        toggle.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('show');
+        });
+        overlay.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            overlay.classList.remove('show');
+        });
         document.addEventListener('click', (e) => {
-            if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !toggle.contains(e.target))
+            if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !toggle.contains(e.target)) {
                 sidebar.classList.remove('open');
+                overlay.classList.remove('show');
+            }
         });
     }
 
@@ -153,6 +202,33 @@ function initCommonUI() {
     if (overlay) {
         overlay.addEventListener('click', closeModal);
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+        // Focus trap: auto-focus first element when modal opens
+        const modalObserver = new MutationObserver(() => {
+            if (overlay.classList.contains('show')) {
+                const focusable = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+                if (focusable.length) focusable[0].focus();
+            }
+        });
+        modalObserver.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+
+        // Tab key trap within modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Tab' || !overlay.classList.contains('show')) return;
+            const modal = overlay.querySelector('.modal');
+            if (!modal) return;
+            const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                last.focus();
+                e.preventDefault();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                first.focus();
+                e.preventDefault();
+            }
+        });
     }
 
     // Tabs
@@ -310,8 +386,149 @@ function initCopyButtons() {
     });
 }
 
+// ==================== BUTTON LOCK (prevent double-submit) ====================
+async function withButtonLock(btnOrId, asyncFn) {
+    const btn = typeof btnOrId === 'string' ? document.getElementById(btnOrId) : btnOrId;
+    if (!btn) return asyncFn();
+    if (btn.disabled) return;
+    const origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="btn-spinner"></span> Сохранение...';
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    try {
+        return await asyncFn();
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
+    }
+}
+
+// ==================== UNDO DELETE ====================
+function confirmDelete(message, onConfirm) {
+    const t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:10px;padding:14px 20px;border-radius:10px;font-size:0.875rem;font-weight:500;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.2);transition:all 0.3s ease;max-width:420px;background:#1F2937;';
+    let cancelled = false;
+    let seconds = 5;
+    t.innerHTML = `<span style="flex:1;">${message}</span><button id="undoBtn" style="background:rgba(255,255,255,0.15);border:none;color:#fff;cursor:pointer;padding:4px 12px;border-radius:6px;font-size:0.8rem;font-weight:600;white-space:nowrap;">Отменить (${seconds})</button>`;
+    document.body.appendChild(t);
+
+    const undoBtn = t.querySelector('#undoBtn');
+    const interval = setInterval(() => {
+        seconds--;
+        if (undoBtn) undoBtn.textContent = `Отменить (${seconds})`;
+        if (seconds <= 0) {
+            clearInterval(interval);
+            if (!cancelled) {
+                t.style.opacity = '0';
+                setTimeout(() => { t.remove(); onConfirm(); }, 300);
+            }
+        }
+    }, 1000);
+
+    undoBtn.addEventListener('click', () => {
+        cancelled = true;
+        clearInterval(interval);
+        t.style.opacity = '0';
+        setTimeout(() => t.remove(), 300);
+        showToast('Удаление отменено', 'info');
+    });
+}
+
+// ==================== FORM VALIDATION ====================
+function validateForm(fields) {
+    let valid = true;
+    fields.forEach(f => {
+        const el = document.getElementById(f.id);
+        if (!el) return;
+        el.classList.remove('invalid');
+        const group = el.closest('.form-group');
+        if (group) group.classList.remove('has-error');
+
+        const val = el.value.trim();
+        if (f.required && !val) {
+            el.classList.add('invalid');
+            if (group) {
+                group.classList.add('has-error');
+                let errEl = group.querySelector('.form-error');
+                if (!errEl) {
+                    errEl = document.createElement('div');
+                    errEl.className = 'form-error';
+                    group.appendChild(errEl);
+                }
+                errEl.textContent = f.message || 'Обязательное поле';
+            }
+            valid = false;
+        }
+    });
+    if (!valid) {
+        const first = document.querySelector('.invalid');
+        if (first) first.focus();
+    }
+    return valid;
+}
+
+// ==================== INLINE EDIT (double-click) ====================
+function initInlineEdit() {
+    document.addEventListener('dblclick', (e) => {
+        const el = e.target.closest('[data-editable]');
+        if (!el || el.querySelector('input,textarea,select')) return;
+
+        const field = el.dataset.editable;
+        const currentValue = el.textContent.trim();
+        let input;
+
+        if (field === 'description' || field === 'comment') {
+            input = document.createElement('textarea');
+            input.style.cssText = 'width:100%;min-height:60px;padding:6px;border:1px solid var(--primary);border-radius:6px;font:inherit;font-size:0.85rem;';
+        } else {
+            input = document.createElement('input');
+            input.type = 'text';
+            input.style.cssText = 'width:100%;padding:4px 8px;border:1px solid var(--primary);border-radius:6px;font:inherit;font-size:0.85rem;';
+        }
+
+        input.value = currentValue;
+        el.textContent = '';
+        el.appendChild(input);
+        input.focus();
+        input.select();
+
+        async function save() {
+            const newVal = input.value.trim() || currentValue;
+            el.textContent = newVal;
+
+            const taskEl = el.closest('[data-task-id]');
+            const projectEl = el.closest('[data-project-id]');
+
+            try {
+                if (taskEl) {
+                    const updates = {};
+                    updates[field] = newVal;
+                    await API.updateTask(taskEl.dataset.taskId, updates);
+                } else if (projectEl) {
+                    const updates = {};
+                    updates[field] = newVal;
+                    await API.updateProject(projectEl.dataset.projectId, updates);
+                }
+            } catch (err) {
+                console.error('Inline edit save failed:', err);
+            }
+        }
+
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); input.blur(); }
+            if (ev.key === 'Escape') { el.textContent = currentValue; }
+        });
+    });
+}
+
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
     initCommonUI();
     initCopyButtons();
+    initInlineEdit();
 });

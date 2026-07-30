@@ -116,7 +116,7 @@
                         <div class="expense-meta">${e.date} ${e.person ? '· ' + e.person : ''} ${e.note ? '· ' + e.note : ''}</div>
                     </div>
                     <div class="expense-amount negative">-${formatMoney(e.amount)} ₽</div>
-                    <button class="btn btn-sm btn-ghost" onclick="deleteExpense(${e.id})" title="Удалить">
+                    <button class="btn btn-sm btn-ghost" onclick="deleteExpense(${e.id})" title="Удалить" aria-label="Удалить">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                     </button>
                 </div>
@@ -142,7 +142,7 @@
                         <button class="btn btn-sm ${s.paid ? 'btn-secondary' : 'btn-success'}" onclick="toggleSalaryPaid(${s.id}, ${!s.paid})">
                             ${s.paid ? 'Отменить' : 'Оплатить'}
                         </button>
-                        <button class="btn btn-sm btn-ghost" onclick="deleteSalary(${s.id})" title="Удалить">
+                        <button class="btn btn-sm btn-ghost" onclick="deleteSalary(${s.id})" title="Удалить" aria-label="Удалить">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                         </button>
                     </div>
@@ -230,9 +230,9 @@
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новый расход</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новый расход</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label">Категория *</label>
+                        <div class="form-group"><label class="form-label" for="expenseCategory">Категория *</label>
                             <select class="form-select" id="expenseCategory">
                                 <option>Зарплата</option>
                                 <option>Оборудование</option>
@@ -245,13 +245,13 @@
                                 <option>Прочее</option>
                             </select>
                         </div>
-                        <div class="form-group"><label class="form-label">Описание *</label><input type="text" class="form-input" id="expenseDesc" placeholder="На что потрачено?"></div>
+                        <div class="form-group"><label class="form-label" for="expenseDesc">Описание *</label><input type="text" class="form-input" id="expenseDesc" placeholder="На что потрачено?"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Сумма *</label><input type="number" class="form-input" id="expenseAmount" placeholder="0"></div>
-                            <div class="form-group"><label class="form-label">Дата *</label><input type="date" class="form-input" id="expenseDate" value="${new Date().toISOString().split('T')[0]}"></div>
+                            <div class="form-group"><label class="form-label" for="expenseAmount">Сумма *</label><input type="number" class="form-input" id="expenseAmount" placeholder="0"></div>
+                            <div class="form-group"><label class="form-label" for="expenseDate">Дата *</label><input type="date" class="form-input" id="expenseDate" value="${new Date().toISOString().split('T')[0]}"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Кто</label>
+                            <div class="form-group"><label class="form-label" for="expensePerson">Кто</label>
                                 <select class="form-select" id="expensePerson">
                                     <option value="">-</option>
                                     <option>Костя</option>
@@ -259,7 +259,7 @@
                                     <option>Андрей</option>
                                 </select>
                             </div>
-                            <div class="form-group"><label class="form-label">Примечание</label><input type="text" class="form-input" id="expenseNote" placeholder="Доп. информация"></div>
+                            <div class="form-group"><label class="form-label" for="expenseNote">Примечание</label><input type="text" class="form-input" id="expenseNote" placeholder="Доп. информация"></div>
                         </div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addExpense()">Добавить</button></div>
@@ -274,9 +274,9 @@
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новая зарплата</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новая зарплата</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label">Сотрудник *</label>
+                        <div class="form-group"><label class="form-label" for="salaryUser">Сотрудник *</label>
                             <select class="form-select" id="salaryUser">
                                 <option>Костя</option>
                                 <option>Максим</option>
@@ -284,10 +284,10 @@
                             </select>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Сумма *</label><input type="number" class="form-input" id="salaryAmount" placeholder="0"></div>
-                            <div class="form-group"><label class="form-label">Месяц *</label><input type="month" class="form-input" id="salaryMonth" value="${currentMonth}"></div>
+                            <div class="form-group"><label class="form-label" for="salaryAmount">Сумма *</label><input type="number" class="form-input" id="salaryAmount" placeholder="0"></div>
+                            <div class="form-group"><label class="form-label" for="salaryMonth">Месяц *</label><input type="month" class="form-input" id="salaryMonth" value="${currentMonth}"></div>
                         </div>
-                        <div class="form-group"><label class="form-label">Примечание</label><input type="text" class="form-input" id="salaryNote" placeholder="Доп. информация"></div>
+                        <div class="form-group"><label class="form-label" for="salaryNote">Примечание</label><input type="text" class="form-input" id="salaryNote" placeholder="Доп. информация"></div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addSalary()">Добавить</button></div>
                 </div>
@@ -298,45 +298,48 @@
 
         // CRUD operations
         window.addExpense = async function() {
-            const category = document.getElementById('expenseCategory').value;
-            const description = document.getElementById('expenseDesc').value.trim();
-            const amount = parseFloat(document.getElementById('expenseAmount').value);
-            const date = document.getElementById('expenseDate').value;
-            const person = document.getElementById('expensePerson').value;
-            const note = document.getElementById('expenseNote').value.trim();
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([
+                    { id: 'expenseDesc', required: true, message: 'Введите описание' },
+                    { id: 'expenseAmount', required: true, message: 'Введите сумму' },
+                    { id: 'expenseDate', required: true, message: 'Выберите дату' }
+                ])) return;
+                
+                const category = document.getElementById('expenseCategory').value;
+                const description = document.getElementById('expenseDesc').value.trim();
+                const amount = parseFloat(document.getElementById('expenseAmount').value);
+                const date = document.getElementById('expenseDate').value;
+                const person = document.getElementById('expensePerson').value;
+                const note = document.getElementById('expenseNote').value.trim();
 
-            if (!description || !amount || !date) {
-                alert('Заполните обязательные поля');
-                return;
-            }
-
-            try {
                 await API.post('/api/expenses', { category, description, amount, date, person, note });
                 closeModal();
+                showToast('Расход добавлен', 'success');
                 loadData();
-            } catch (err) {
-                alert('Ошибка: ' + err.message);
-            }
+            });
         };
 
         window.addSalary = async function() {
-            const user_name = document.getElementById('salaryUser').value;
-            const amount = parseFloat(document.getElementById('salaryAmount').value);
-            const month = document.getElementById('salaryMonth').value;
-            const note = document.getElementById('salaryNote').value.trim();
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([
+                    { id: 'salaryAmount', required: true, message: 'Введите сумму' },
+                    { id: 'salaryMonth', required: true, message: 'Выберите месяц' }
+                ])) return;
+                
+                const user_name = document.getElementById('salaryUser').value;
+                const amount = parseFloat(document.getElementById('salaryAmount').value);
+                const month = document.getElementById('salaryMonth').value;
+                const note = document.getElementById('salaryNote').value.trim();
 
-            if (!amount || !month) {
-                alert('Заполните обязательные поля');
-                return;
-            }
-
-            try {
                 await API.post('/api/salaries', { user_name, amount, month, note });
                 closeModal();
+                showToast('Зарплата добавлена', 'success');
                 loadData();
-            } catch (err) {
-                alert('Ошибка: ' + err.message);
-            }
+            });
         };
 
         window.toggleSalaryPaid = async function(id, paid) {
@@ -345,30 +348,35 @@
 
             try {
                 await API.put(`/api/salaries/${id}`, { ...salary, paid });
+                showToast(paid ? 'Зарплата выплачена' : 'Отменено', 'success');
                 loadData();
             } catch (err) {
-                alert('Ошибка: ' + err.message);
+                showToast('Ошибка: ' + err.message, 'error');
             }
         };
 
         window.deleteExpense = async function(id) {
-            if (!confirm('Удалить расход?')) return;
-            try {
-                await API.delete(`/api/expenses/${id}`);
-                loadData();
-            } catch (err) {
-                alert('Ошибка: ' + err.message);
-            }
+            confirmDelete('Удалить расход?', async () => {
+                try {
+                    await API.delete(`/api/expenses/${id}`);
+                    showToast('Расход удалён', 'success');
+                    loadData();
+                } catch (err) {
+                    showToast('Ошибка: ' + err.message, 'error');
+                }
+            });
         };
 
         window.deleteSalary = async function(id) {
-            if (!confirm('Удалить запись о зарплате?')) return;
-            try {
-                await API.delete(`/api/salaries/${id}`);
-                loadData();
-            } catch (err) {
-                alert('Ошибка: ' + err.message);
-            }
+            confirmDelete('Удалить запись о зарплате?', async () => {
+                try {
+                    await API.delete(`/api/salaries/${id}`);
+                    showToast('Запись удалена', 'success');
+                    loadData();
+                } catch (err) {
+                    showToast('Ошибка: ' + err.message, 'error');
+                }
+            });
         };
 
         // Initial load

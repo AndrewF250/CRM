@@ -1,137 +1,118 @@
-# CRM System — WebAgency (Internal)
+# CRM System — WebAgency
 
 Внутренняя CRM для управления проектами веб-агентства. Только для сотрудников компании.
 
 ## Быстрый старт
 
-Откройте `index.html` в браузере. Никакой сервер не нужен — чистый HTML/CSS/JS.
+```bash
+cd server
+npm install
+node seed.js      # заполнить базу тестовыми данными
+node server.js    # запустить сервер на порту 3005
+```
+
+Откройте http://localhost:3005
 
 ## Деплой на сервер
 
-### Вариант 1: Nginx
+### Вариант 1: PM2 + Nginx
 
-1. Скопируйте файлы на сервер:
-   ```bash
-   scp -r ./* user@server:/var/www/crm/
-   ```
+```bash
+# Загрузить файлы на сервер
+scp -r ./server/* user@server:/var/www/crm/
 
-2. Используйте конфиг `nginx.conf`:
-   ```bash
-   sudo cp nginx.conf /etc/nginx/sites-available/crm
-   sudo ln -s /etc/nginx/sites-available/crm /etc/nginx/sites-enabled/
-   sudo nginx -t
-   sudo systemctl reload nginx
-   ```
-
-### Вариант 2: Apache
-
-1. Скопируйте файлы на сервер в папку `public_html` или `www`
-
-2. Файл `.htaccess` уже настроен для:
-   - Сжатия файлов (gzip)
-   - Кеширования статики
-   - Безопасных заголовков
-
-### Вариант 3: Docker
-
-Создайте `Dockerfile`:
-```dockerfile
-FROM nginx:alpine
-COPY . /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+# На сервере:
+cd /var/www/crm
+npm install
+node seed.js
+npm install -g pm2
+pm2 start server.js --name crm
+pm2 save
+pm2 startup
 ```
 
-Запуск:
+Nginx — проксировать на `http://127.0.0.1:3005`.
+
+### Вариант 2: Docker
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY server/ .
+RUN npm install
+RUN node seed.js
+EXPOSE 3005
+CMD ["node", "server.js"]
+```
+
 ```bash
 docker build -t crm .
-docker run -d -p 80:80 crm
+docker run -d -p 3005:3005 crm
 ```
-
-### Вариант 4: GitHub Pages / Netlify / Vercel
-
-Просто загрузите файлы в репозиторий и подключите хостинг.
 
 ## Структура проекта
 
 ```
-crm/
-├── index.html          → редирект на login
-├── pages/
-│   ├── login.html      → авторизация
-│   ├── dashboard.html  → дашборд
-│   ├── projects.html   → Канбан-доска
-│   ├── project_*.html  → карточки проектов
-│   ├── tasks.html      → задачи
-│   ├── task_*.html     → детали задач
-│   ├── documents.html  → документы
-│   ├── calendar.html   → календарь
-│   └── settings.html   → настройки
-├── assets/
-│   ├── css/style.css   → стили
-│   └── js/layout.js    → интерактивность
-├── .htaccess           → конфиг Apache
-└── nginx.conf          → конфиг Nginx
+crm-webagency/
+├── server/
+│   ├── server.js       → Express API (681 строка)
+│   ├── database.js     → SQLite схема и миграции
+│   ├── seed.js         → заполнение базы тестовыми данными
+│   ├── package.json    → зависимости
+│   └── public/         → фронтенд (SPA)
+│       ├── index.html  → редирект на login
+│       ├── assets/
+│       │   ├── css/style.css   → стили (570 строк)
+│       │   └── js/
+│       │       ├── api.js      → API-клиент с авторизацией
+│       │       ├── app.js      → компоненты и UI-логика
+│       │       └── crm-data.js → слой данных
+│       └── pages/
+│           ├── login.html      → авторизация
+│           ├── dashboard.html  → дашборд
+│           ├── projects.html   → Канбан-доска
+│           ├── tasks.html      → задачи
+│           ├── documents.html  → документы
+│           ├── calendar.html   → календарь
+│           ├── money.html      → финансы
+│           ├── settings.html   → настройки
+│           └── project.html    → детали проекта (динамическая)
+├── nginx.conf          → конфиг Nginx
+└── deploy.sh           → скрипт деплоя
 ```
 
-## Страницы
+## API эндпоинты
 
-| Страница | Описание |
-|----------|----------|
-| **Авторизация** | Форма входа |
-| **Дашборд** | Задачи на сегодня, статистика, недавние проекты |
-| **Проекты** | Канбан-доска (drag & drop) и таблица, фильтры |
-| **Детали проекта** | Задачи, документы, звонки, доступы |
-| **Задачи** | Все задачи, сгруппированные по дням |
-| **Документы** | Файлы по всем проектам с навигацией |
-| **Календарь** | Задачи по дням, цветовая маркировка |
-| **Настройки** | Профиль, уведомления, шаблоны, команда |
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/api/login` | Авторизация |
+| POST | `/api/logout` | Выход |
+| GET | `/api/auth/me` | Текущий пользователь |
+| GET | `/api/projects` | Список проектов |
+| POST | `/api/projects` | Создать проект |
+| PUT | `/api/projects/:id` | Обновить проект |
+| DELETE | `/api/projects/:id` | Удалить проект |
+| GET | `/api/tasks` | Список задач |
+| POST | `/api/tasks` | Создать задачу |
+| PUT | `/api/tasks/:id` | Обновить задачу |
+| DELETE | `/api/tasks/:id` | Удалить задачу |
+| GET | `/api/documents` | Документы |
+| POST | `/api/documents/upload` | Загрузить файл |
+| GET | `/api/stats` | Статистика дашборда |
+| GET | `/api/salaries` | Зарплаты |
+| GET | `/api/expenses` | Расходы |
 
-## Функциональность
+## Авторизация
 
-- Sidebar с навигацией и бейджами
-- Dropdown: уведомления, меню пользователя
-- Модальные окна: создание проекта, задачи, загрузка файлов
-- Табы: переключение вкладок
-- Kanban: drag-and-drop карточек
-- Чекбоксы задач: переключение статуса
-- Копирование паролей/логинов в буфер
-- Фильтры-чипсы
-- Адаптивная вёрстка (мобильные, планшеты, десктоп)
-- Документы: привязка к проектам, загрузка, скачивание
-- Звонки: заглушка для будущей интеграции с ботом
-- Календарь: задачи по дням, цвета по статусу
+Логины по умолчанию (захардкожены в `server.js`):
 
-## Кастомизация
-
-### Цвета
-
-Все цвета заданы через CSS-переменные в `assets/css/style.css`:
-
-```css
-:root {
-    --primary: #6366F1;
-    --success: #10B981;
-    --warning: #F59E0B;
-    --danger: #EF4444;
-    --sidebar-bg: #111827;
-}
-```
-
-### Шрифты
-
-Проект использует Google Fonts (Inter). Для смены шрифта измените строку в CSS:
-
-```css
-@import url('https://fonts.googleapis.com/css2?family=Your+Font:wght@400;500;600;700&display=swap');
-```
+| Логин | Пароль |
+|-------|--------|
+| Костя | kostya2026 |
+| Максим | maxim2026 |
+| Андрей | andrey2026 |
 
 ## Требования
 
-- [x] Управление проектами — Канбан-доска, карточки
-- [x] Доступы к проектам — логины, пароли, хостинги
-- [x] Управление задачами — задачи, подзадачи, дедлайны
-- [x] Дашборд «Сегодня» — задачи на день
-- [x] Документы — привязка к проектам, загрузка, навигация
-- [x] Звонки — заглушка для будущей интеграции с ботом
-- [x] Настройки — профиль, уведомления, шаблоны, команда
+- Node.js 18+
+- npm

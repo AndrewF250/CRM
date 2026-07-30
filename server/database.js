@@ -144,4 +144,21 @@ try {
   db.exec("ALTER TABLE documents ADD COLUMN template_category TEXT DEFAULT 'Другое'");
 }
 
+// Migration: add parent_id to tasks (for task nesting)
+try {
+  db.prepare("SELECT parent_id FROM tasks LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT NULL REFERENCES tasks(id) ON DELETE CASCADE");
+}
+
+// Create kanban_columns table for configurable project columns
+db.exec(`
+  CREATE TABLE IF NOT EXISTS kanban_columns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT DEFAULT 'blue',
+    sort_order INTEGER DEFAULT 0
+  );
+`);
+
 module.exports = db;

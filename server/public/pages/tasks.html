@@ -72,16 +72,17 @@
         };
         
         window.deleteTask = async function(id) {
-            if (!confirm('Удалить задачу?')) return;
-            try {
-                await API.deleteTask(id);
-                showToast('Задача удалена', 'success');
-                await CRM.load();
-                renderTasks();
-                loadActivity();
-            } catch (err) {
-                showToast('Ошибка', 'error');
-            }
+            confirmDelete('Удалить задачу?', async () => {
+                try {
+                    await API.deleteTask(id);
+                    showToast('Задача удалена', 'success');
+                    await CRM.load();
+                    renderTasks();
+                    loadActivity();
+                } catch (err) {
+                    showToast('Ошибка', 'error');
+                }
+            });
         };
         
         window.toggleTask = async function(taskId, done) {
@@ -147,13 +148,23 @@
             }
             currentSubtasks = Object.values(allSubtasks).flat();
             
-            let html = '';
+            // Build hierarchy: separate top-level and child tasks
+            const topLevel = tasks.filter(t => !t.parent_id);
+            const childrenMap = {};
             tasks.forEach(t => {
+                if (t.parent_id) {
+                    if (!childrenMap[t.parent_id]) childrenMap[t.parent_id] = [];
+                    childrenMap[t.parent_id].push(t);
+                }
+            });
+            
+            function renderTaskCard(t, isChild) {
                 const project = CRM.getProject(t.project_id);
                 const subtasks = allSubtasks[t.id] || [];
                 const doneSubtasks = subtasks.filter(s => s.done).length;
+                const children = childrenMap[t.id] || [];
                 
-                html += `<div class="task-card${t.done ? ' done' : ''}">
+                let html = `<div class="task-card${t.done ? ' done' : ''}${isChild ? ' child' : ''}" data-task-id="${t.id}" draggable="true">
                     <div style="display:flex;align-items:flex-start;gap:12px;">
                         <input type="checkbox" class="subtask-checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)" style="margin-top:2px;">
                         <div style="flex:1;">
@@ -167,12 +178,14 @@
                                         <span>·</span>
                                         <span>${t.date || ''} ${t.time || ''}</span>
                                         ${t.urgent ? '<span class="badge badge-danger" style="font-size:0.65rem;">СРОЧНО</span>' : ''}
+                                        ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + ' подзадач</span>' : ''}
                                     </div>
-                                    ${subtasks.length > 0 ? '<div style="margin-top:4px;font-size:0.75rem;color:var(--gray-400);">Подзадачи: ' + doneSubtasks + '/' + subtasks.length + '</div>' : ''}
+                                    ${subtasks.length > 0 ? '<div style="margin-top:4px;font-size:0.75rem;color:var(--gray-400);">Чеклист: ' + doneSubtasks + '/' + subtasks.length + '</div>' : ''}
                                 </div>
-                                <div style="display:flex;gap:4px;">
-                                    <button class="btn btn-ghost btn-sm" onclick="showAddSubtaskModal('${t.id}')" title="Добавить подзадачу">+</button>
-                                    <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteTask('${t.id}')" title="Удалить">✕</button>
+                                <div style="display:flex;gap:4px;align-items:center;">
+                                    ${isChild ? '<button class="task-unparent" onclick="unparentTask(\'' + t.id + '\')" title="Сделать самостоятельной" aria-label="Сделать самостоятельной">↑ открепить</button>' : ''}
+                                    <button class="btn btn-ghost btn-sm" onclick="showAddSubtaskModal('${t.id}')" title="Добавить подзадачу" aria-label="Добавить подзадачу">+</button>
+                                    <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteTask('${t.id}')" title="Удалить" aria-label="Удалить">✕</button>
                                 </div>
                             </div>
                             ${subtasks.length > 0 ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);">' + subtasks.map(s => `
@@ -180,15 +193,32 @@
                                     <input type="checkbox" class="subtask-checkbox" ${s.done ? 'checked' : ''} onchange="toggleSubtask('${s.id}', this.checked)">
                                     <span class="subtask-name${s.done ? ' done' : ''}">${s.name}</span>
                                     <span class="subtask-meta">${s.person || ''} ${s.deadline ? '· ' + s.deadline : ''}</span>
-                                    <button class="btn btn-ghost btn-sm" style="padding:2px 4px;font-size:0.7rem;" onclick="deleteSubtask('${s.id}')">✕</button>
+                                    <button class="btn btn-ghost btn-sm" style="padding:2px 4px;font-size:0.7rem;" onclick="deleteSubtask('${s.id}')" aria-label="Удалить подзадачу">✕</button>
                                 </div>
                             `).join('') + '</div>' : ''}
                         </div>
-                    </div>
-                </div>`;
+                    </div>`;
+
+                // Render children
+                if (children.length > 0) {
+                    html += '<div class="task-children">';
+                    children.forEach(child => {
+                        html += renderTaskCard(child, true);
+                    });
+                    html += '</div>';
+                }
+
+                html += '</div>';
+                return html;
+            }
+            
+            let html = '';
+            topLevel.forEach(t => {
+                html += renderTaskCard(t, false);
             });
             
             document.getElementById('tasksList').innerHTML = html;
+            initTaskDragAndDrop();
         }
         
         async function loadActivity() {
@@ -241,16 +271,16 @@
             
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Проект</label><select class="form-select" id="newTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
-                            <div class="form-group"><label class="form-label">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="newTaskProject">Проект</label><select class="form-select" id="newTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPerson">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Дата</label><input type="text" class="form-input" id="newTaskDate" placeholder="25.07" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskTime">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                         <div class="form-group"><label class="form-check"><input type="checkbox" id="newTaskUrgent" onclick="event.stopPropagation()"> Срочно</label></div>
                     </div>
@@ -265,12 +295,12 @@
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новая подзадача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новая подзадача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label">Название *</label><input type="text" class="form-input" id="subtaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label" for="subtaskName">Название *</label><input type="text" class="form-input" id="subtaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Ответственный</label><select class="form-select" id="subtaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
-                            <div class="form-group"><label class="form-label">Дедлайн</label><input type="text" class="form-input" id="subtaskDeadline" placeholder="25.07" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="subtaskPerson">Ответственный</label><select class="form-select" id="subtaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="subtaskDeadline">Дедлайн</label><input type="date" class="form-input" id="subtaskDeadline" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createSubtask('${taskId}')">Создать</button></div>
@@ -281,10 +311,14 @@
         };
         
         window.createTask = async function() {
-            const name = document.getElementById('newTaskName').value.trim();
-            if (!name) { showToast('Введите название', 'error'); return; }
-            
-            try {
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([
+                    { id: 'newTaskName', required: true, message: 'Введите название' }
+                ])) return;
+                const name = document.getElementById('newTaskName').value.trim();
+                
                 await CRM.addTask({
                     project_id: document.getElementById('newTaskProject').value,
                     name: name,
@@ -302,16 +336,18 @@
                 await CRM.load();
                 await renderTasks();
                 await loadActivity();
-            } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
-            }
+            });
         };
         
         window.createSubtask = async function(taskId) {
-            const name = document.getElementById('subtaskName').value.trim();
-            if (!name) { showToast('Введите название', 'error'); return; }
-            
-            try {
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([
+                    { id: 'subtaskName', required: true, message: 'Введите название' }
+                ])) return;
+                const name = document.getElementById('subtaskName').value.trim();
+                
                 await API.createSubtask({
                     task_id: taskId,
                     name: name,
@@ -322,8 +358,66 @@
                 closeModal();
                 showToast('Подзадача создана', 'success');
                 await renderTasks();
+            });
+        };
+
+        // ===== DRAG-TO-NEST =====
+        function initTaskDragAndDrop() {
+            const cards = document.querySelectorAll('.task-card[draggable="true"]');
+            let draggedId = null;
+
+            cards.forEach(card => {
+                card.addEventListener('dragstart', (e) => {
+                    draggedId = card.dataset.taskId;
+                    card.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', draggedId);
+                });
+                card.addEventListener('dragend', () => {
+                    card.classList.remove('dragging');
+                    document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+                    draggedId = null;
+                });
+                card.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    if (draggedId && card.dataset.taskId !== draggedId) {
+                        card.classList.add('drop-target');
+                    }
+                });
+                card.addEventListener('dragleave', () => {
+                    card.classList.remove('drop-target');
+                });
+                card.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    card.classList.remove('drop-target');
+                    const targetId = card.dataset.taskId;
+                    if (!draggedId || draggedId === targetId) return;
+
+                    try {
+                        const task = CRM.getTasks().find(t => t.id === draggedId);
+                        if (!task) return;
+                        await API.updateTask(draggedId, { ...task, parent_id: targetId });
+                        showToast('Задача стала подзадачей', 'success');
+                        await CRM.load();
+                        await renderTasks();
+                    } catch (err) {
+                        showToast(err.message || 'Ошибка', 'error');
+                    }
+                });
+            });
+        }
+
+        // ===== UNPARENT TASK =====
+        window.unparentTask = async function(taskId) {
+            try {
+                const task = CRM.getTasks().find(t => t.id === taskId);
+                if (!task) return;
+                await API.updateTask(taskId, { ...task, parent_id: null });
+                showToast('Задача теперь самостоятельная', 'success');
+                await CRM.load();
+                await renderTasks();
             } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
+                showToast(err.message || 'Ошибка', 'error');
             }
         };
     })();

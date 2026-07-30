@@ -78,7 +78,13 @@
         
         let kanbanHtml = '<div style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;">';
         columns.forEach(col => {
-            const colTasks = tasks.filter(t => t.column_status === col.name);
+            const colTasks = tasks.filter(t => t.column_status === col.name && !t.parent_id);
+            const childrenMap = {};
+            tasks.filter(t => t.parent_id).forEach(t => {
+                if (!childrenMap[t.parent_id]) childrenMap[t.parent_id] = [];
+                childrenMap[t.parent_id].push(t);
+            });
+
             kanbanHtml += `<div class="kanban-column" style="min-width:200px;flex:1;background:${col.bg};border-radius:var(--radius-lg);padding:12px;">
                 <div style="font-weight:700;font-size:0.85rem;color:var(--gray-600);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
                     <span class="status-dot ${col.dot}"></span> ${col.name} <span class="kanban-count" style="background:var(--gray-300);color:var(--gray-700);font-size:0.6rem;padding:2px 6px;border-radius:var(--radius-full);">${colTasks.length}</span>
@@ -86,13 +92,25 @@
                 <div class="kanban-column-body" data-column="${col.name}" style="min-height:60px;">`;
             
             colTasks.forEach(t => {
+                const children = childrenMap[t.id] || [];
                 kanbanHtml += `<div class="kanban-card" data-task-id="${t.id}" style="background:var(--white);border-radius:var(--radius-md);padding:10px;margin-bottom:8px;cursor:grab;">
                     <div style="display:flex;align-items:center;gap:6px;">
                         <input type="checkbox" ${t.done ? 'checked' : ''} style="width:14px;height:14px;" onchange="toggleTask('${t.id}', this.checked)">
                         <span style="font-weight:600;font-size:0.85rem;${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</span>
+                        ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + '</span>' : ''}
                     </div>
-                    <div style="font-size:0.7rem;color:var(--gray-500);margin-top:4px;">${t.person} · ${t.date || ''} ${t.time || ''}</div>
-                </div>`;
+                    <div style="font-size:0.7rem;color:var(--gray-500);margin-top:4px;">${t.person} · ${t.date || ''} ${t.time || ''}</div>`;
+                if (children.length > 0) {
+                    kanbanHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--gray-100);">';
+                    children.forEach(child => {
+                        kanbanHtml += `<div class="kanban-subtask${child.done ? ' done' : ''}" style="display:flex;align-items:center;gap:4px;padding:2px 0;">
+                            <input type="checkbox" ${child.done ? 'checked' : ''} style="width:12px;height:12px;" onchange="toggleTask('${child.id}', this.checked)">
+                            <span style="font-size:0.75rem;${child.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${child.name}</span>
+                        </div>`;
+                    });
+                    kanbanHtml += '</div>';
+                }
+                kanbanHtml += '</div>';
             });
             
             kanbanHtml += '</div></div>';
@@ -239,6 +257,50 @@
         // Init kanban drag and drop for tasks
         initKanban();
         
+        // Add drag-to-nest on kanban cards
+        function initKanbanNest() {
+            const cards = document.querySelectorAll('.kanban-card[data-task-id]');
+            let draggedId = null;
+
+            cards.forEach(card => {
+                card.addEventListener('dragstart', (e) => {
+                    draggedId = card.dataset.taskId;
+                    e.dataTransfer.setData('text/nest-id', draggedId);
+                }, true);
+
+                card.addEventListener('dragover', (e) => {
+                    if (draggedId && card.dataset.taskId !== draggedId) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        card.classList.add('drop-target');
+                    }
+                });
+
+                card.addEventListener('dragleave', () => {
+                    card.classList.remove('drop-target');
+                });
+
+                card.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    card.classList.remove('drop-target');
+                    const targetId = card.dataset.taskId;
+                    if (!draggedId || draggedId === targetId) return;
+
+                    try {
+                        const task = (await API.getTasks()).find(t => t.id === draggedId);
+                        if (!task) return;
+                        await API.updateTask(draggedId, { ...task, parent_id: targetId });
+                        showToast('Задача вложена', 'success');
+                        setTimeout(() => location.reload(), 500);
+                    } catch (err) {
+                        showToast(err.message || 'Ошибка', 'error');
+                    }
+                });
+            });
+        }
+        initKanbanNest();
+        
         // Toggle task done
         window.toggleTask = async function(taskId, done) {
             try {
@@ -252,26 +314,28 @@
         
         // Delete project
         window.deleteProject = async function() {
-            if (!confirm('Удалить проект и все его задачи?')) return;
-            try {
-                await API.deleteProject(projectId);
-                showToast('Проект удалён', 'success');
-                window.location.href = '/pages/projects.html';
-            } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
-            }
+            confirmDelete('Удалить проект и все его задачи?', async () => {
+                try {
+                    await API.deleteProject(projectId);
+                    showToast('Проект удалён', 'success');
+                    window.location.href = '/pages/projects.html';
+                } catch (err) {
+                    showToast('Ошибка: ' + err.message, 'error');
+                }
+            });
         };
         
         // Delete document
         window.deleteDoc = async function(id) {
-            if (!confirm('Удалить документ?')) return;
-            try {
-                await API.deleteDocument(id);
-                showToast('Документ удалён', 'success');
-                setTimeout(() => location.reload(), 500);
-            } catch (err) {
-                showToast('Ошибка', 'error');
-            }
+            confirmDelete('Удалить документ?', async () => {
+                try {
+                    await API.deleteDocument(id);
+                    showToast('Документ удалён', 'success');
+                    setTimeout(() => location.reload(), 500);
+                } catch (err) {
+                    showToast('Ошибка', 'error');
+                }
+            });
         };
         
         // Edit project modal
@@ -279,27 +343,27 @@
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
                 <div class="modal modal-lg" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Редактировать — ${project.name}</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Редактировать — ${project.name}</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Название</label><input type="text" class="form-input" id="editName" value="${project.name}" onclick="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label">Клиент</label><input type="text" class="form-input" id="editClient" value="${project.client}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editName">Название</label><input type="text" class="form-input" id="editName" value="${project.name}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editClient">Клиент</label><input type="text" class="form-input" id="editClient" value="${project.client}" onclick="event.stopPropagation()"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Статус</label><select class="form-select" id="editStatus" onclick="event.stopPropagation()"><option${project.status==='Новый'?' selected':''}>Новый</option><option${project.status==='Переговоры'?' selected':''}>Переговоры</option><option${project.status==='В работе'?' selected':''}>В работе</option><option${project.status==='Абонемент'?' selected':''}>Абонемент</option><option${project.status==='Выполнено'?' selected':''}>Выполнено</option></select></div>
-                            <div class="form-group"><label class="form-label">Сумма (₽)</label><input type="number" class="form-input" id="editAmount" value="${project.amount}" onclick="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label">Дедлайн</label><input type="text" class="form-input" id="editDeadline" value="${project.deadline || ''}" onclick="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label">Дата оплаты</label><input type="date" class="form-input" id="editPayDate" value="${project.payment_due_date || ''}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editStatus">Статус</label><select class="form-select" id="editStatus" onclick="event.stopPropagation()"><option${project.status==='Новый'?' selected':''}>Новый</option><option${project.status==='Переговоры'?' selected':''}>Переговоры</option><option${project.status==='В работе'?' selected':''}>В работе</option><option${project.status==='Абонемент'?' selected':''}>Абонемент</option><option${project.status==='Выполнено'?' selected':''}>Выполнено</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editAmount">Сумма (₽)</label><input type="number" class="form-input" id="editAmount" value="${project.amount}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editDeadline">Дедлайн</label><input type="text" class="form-input" id="editDeadline" value="${project.deadline || ''}" onclick="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editPayDate">Дата оплаты</label><input type="date" class="form-input" id="editPayDate" value="${project.payment_due_date || ''}" onclick="event.stopPropagation()"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Оплата</label><select class="form-select" id="editPayStatus" onclick="event.stopPropagation()"><option value="unpaid"${project.pay_status==='unpaid'?' selected':''}>Не оплачено</option><option value="pending"${project.pay_status==='pending'?' selected':''}>Ждём</option><option value="paid"${project.pay_status==='paid'?' selected':''}>Оплачено</option></select></div>
-                            <div class="form-group"><label class="form-label">Способ</label><select class="form-select" id="editPayMethod" onclick="event.stopPropagation()"><option${project.pay_method==='Наличные'?' selected':''}>Наличные</option><option${project.pay_method==='По счёту'?' selected':''}>По счёту</option><option${project.pay_method==='Рассрочка'?' selected':''}>Рассрочка</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editPayStatus">Оплата</label><select class="form-select" id="editPayStatus" onclick="event.stopPropagation()"><option value="unpaid"${project.pay_status==='unpaid'?' selected':''}>Не оплачено</option><option value="pending"${project.pay_status==='pending'?' selected':''}>Ждём</option><option value="paid"${project.pay_status==='paid'?' selected':''}>Оплачено</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editPayMethod">Способ</label><select class="form-select" id="editPayMethod" onclick="event.stopPropagation()"><option${project.pay_method==='Наличные'?' selected':''}>Наличные</option><option${project.pay_method==='По счёту'?' selected':''}>По счёту</option><option${project.pay_method==='Рассрочка'?' selected':''}>Рассрочка</option></select></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Адекватность</label><select class="form-select" id="editAdequacy" onclick="event.stopPropagation()"><option value="good"${project.adequacy==='good'?' selected':''}>Нормальный</option><option value="warn"${project.adequacy==='warn'?' selected':''}>Осторожно</option><option value="bad"${project.adequacy==='bad'?' selected':''}>Не работаем</option></select></div>
-                            <div class="form-group"><label class="form-label">Источник</label><select class="form-select" id="editSource" onclick="event.stopPropagation()"><option${project.source==='Сайт'?' selected':''}>Сайт</option><option${project.source==='Авито'?' selected':''}>Авито</option><option${project.source==='Telegram'?' selected':''}>Telegram</option><option${project.source==='Реклама'?' selected':''}>Реклама</option><option${project.source==='Знакомые'?' selected':''}>Знакомые</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editAdequacy">Адекватность</label><select class="form-select" id="editAdequacy" onclick="event.stopPropagation()"><option value="good"${project.adequacy==='good'?' selected':''}>Нормальный</option><option value="warn"${project.adequacy==='warn'?' selected':''}>Осторожно</option><option value="bad"${project.adequacy==='bad'?' selected':''}>Не работаем</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editSource">Источник</label><select class="form-select" id="editSource" onclick="event.stopPropagation()"><option${project.source==='Сайт'?' selected':''}>Сайт</option><option${project.source==='Авито'?' selected':''}>Авито</option><option${project.source==='Telegram'?' selected':''}>Telegram</option><option${project.source==='Реклама'?' selected':''}>Реклама</option><option${project.source==='Знакомые'?' selected':''}>Знакомые</option></select></div>
                         </div>
-                        <div class="form-group"><label class="form-label">Описание</label><textarea class="form-textarea" id="editDescription" onclick="event.stopPropagation()">${project.description || ''}</textarea></div>
+                        <div class="form-group"><label class="form-label" for="editDescription">Описание</label><textarea class="form-textarea" id="editDescription" onclick="event.stopPropagation()">${project.description || ''}</textarea></div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="saveProject()">Сохранить</button></div>
                 </div>
@@ -309,7 +373,14 @@
         };
         
         window.saveProject = async function() {
-            try {
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([
+                    { id: 'editName', required: true, message: 'Введите название' },
+                    { id: 'editClient', required: true, message: 'Введите клиента' }
+                ])) return;
+                
                 await API.updateProject(projectId, {
                     name: document.getElementById('editName').value,
                     client: document.getElementById('editClient').value,
@@ -332,9 +403,7 @@
                 closeModal();
                 showToast('Проект обновлён', 'success');
                 setTimeout(() => location.reload(), 500);
-            } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
-            }
+            });
         };
         
         // Add task modal
@@ -342,13 +411,13 @@
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
-                            <div class="form-group"><label class="form-label">Дата</label><input type="text" class="form-input" id="newTaskDate" placeholder="25.07" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPerson">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskTime">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addTask()">Создать</button></div>
@@ -359,10 +428,14 @@
         };
         
         window.addTask = async function() {
-            const name = document.getElementById('newTaskName').value.trim();
-            if (!name) { showToast('Введите название', 'error'); return; }
-            
-            try {
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([
+                    { id: 'newTaskName', required: true, message: 'Введите название' }
+                ])) return;
+                const name = document.getElementById('newTaskName').value.trim();
+                
                 await CRM.addTask({
                     project_id: projectId,
                     name: name,
@@ -377,9 +450,7 @@
                 closeModal();
                 showToast('Задача создана', 'success');
                 setTimeout(() => location.reload(), 500);
-            } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
-            }
+            });
         };
         
         // Upload document modal
@@ -387,15 +458,15 @@
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Загрузить файл</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Загрузить файл</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label">Название файла *</label><input type="text" class="form-input" id="docName" placeholder="Договор.pdf" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label" for="docName">Название файла *</label><input type="text" class="form-input" id="docName" placeholder="Договор.pdf" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Тип</label><select class="form-select" id="docType" onclick="event.stopPropagation()"><option>PDF</option><option>DOCX</option><option>XLSX</option><option>ZIP</option><option>PNG</option></select></div>
-                            <div class="form-group"><label class="form-label">Размер</label><input type="text" class="form-input" id="docSize" placeholder="245 KB" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="docType">Тип</label><select class="form-select" id="docType" onclick="event.stopPropagation()"><option>PDF</option><option>DOCX</option><option>XLSX</option><option>ZIP</option><option>PNG</option></select></div>
+                            <div class="form-group"><label class="form-label" for="docSize">Размер</label><input type="text" class="form-input" id="docSize" placeholder="245 KB" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Файл</label>
+                            <label class="form-label" for="fileInput">Файл</label>
                             <div style="border:2px dashed var(--gray-300);border-radius:12px;padding:32px;text-align:center;cursor:pointer;" onclick="document.getElementById('fileInput').click()" ondragover="event.preventDefault();this.style.borderColor='var(--primary)'" ondragleave="this.style.borderColor='var(--gray-300)'" ondrop="event.preventDefault();this.style.borderColor='var(--gray-300)';handleFileDrop(event)">
                                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" stroke-width="1.5" style="margin:0 auto 8px;display:block;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                                 <p class="fw-600 text-muted" id="fileLabel">Нажмите или перетащите файл</p>
@@ -437,11 +508,14 @@
         };
         
         window.uploadDocument = async function() {
-            const name = document.getElementById('docName').value.trim();
-            if (!name) { showToast('Введите название файла', 'error'); return; }
-            
-            try {
-                // If we have a real file, upload it
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([
+                    { id: 'docName', required: true, message: 'Введите название файла' }
+                ])) return;
+                const name = document.getElementById('docName').value.trim();
+                
                 if (selectedFile) {
                     const formData = new FormData();
                     formData.append('file', selectedFile);
@@ -456,7 +530,6 @@
                         body: formData
                     });
                 } else {
-                    // Just add document record
                     await API.addDocument({
                         project_id: projectId,
                         name: name,
@@ -468,9 +541,7 @@
                 closeModal();
                 showToast('Документ загружен', 'success');
                 setTimeout(() => location.reload(), 500);
-            } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
-            }
+            });
         };
         
         function formatFileSize(bytes) {

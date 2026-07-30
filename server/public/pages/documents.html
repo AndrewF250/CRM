@@ -197,14 +197,15 @@
         };
         
         window.deleteDoc = async function(id) {
-            if (!confirm('Удалить документ?')) return;
-            try {
-                await API.delete(`/api/documents/${id}`);
-                showToast('Документ удалён', 'success');
-                renderTabContent();
-            } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
-            }
+            confirmDelete('Удалить документ?', async () => {
+                try {
+                    await API.delete(`/api/documents/${id}`);
+                    showToast('Документ удалён', 'success');
+                    renderTabContent();
+                } catch (err) {
+                    showToast('Ошибка: ' + err.message, 'error');
+                }
+            });
         };
         
         window.showAddDocModal = function() {
@@ -218,17 +219,17 @@
             
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">${isTemplate ? 'Добавить шаблон/материал' : 'Загрузить документ клиента'}</h3><button class="modal-close" onclick="closeModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">${isTemplate ? 'Добавить шаблон/материал' : 'Загрузить документ клиента'}</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        ${!isTemplate ? '<div class="form-group"><label class="form-label">Проект *</label><select class="form-select" id="docProject" onclick="event.stopPropagation()">' + projectOptions + '</select></div>' : ''}
-                        ${isTemplate ? `<div class="form-group"><label class="form-label">Категория</label><select class="form-select" id="templateCategory" onclick="event.stopPropagation()"><option>Шаблон</option><option>Промпт</option><option>SEO</option><option>Другое</option></select></div>` : ''}
-                        <div class="form-group"><label class="form-label">Название файла *</label><input type="text" class="form-input" id="docName" placeholder="${isTemplate ? 'Шаблон договора.docx' : 'Договор.pdf'}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        ${!isTemplate ? '<div class="form-group"><label class="form-label" for="docProject">Проект *</label><select class="form-select" id="docProject" onclick="event.stopPropagation()">' + projectOptions + '</select></div>' : ''}
+                        ${isTemplate ? `<div class="form-group"><label class="form-label" for="templateCategory">Категория</label><select class="form-select" id="templateCategory" onclick="event.stopPropagation()"><option>Шаблон</option><option>Промпт</option><option>SEO</option><option>Другое</option></select></div>` : ''}
+                        <div class="form-group"><label class="form-label" for="docName">Название файла *</label><input type="text" class="form-input" id="docName" placeholder="${isTemplate ? 'Шаблон договора.docx' : 'Договор.pdf'}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label">Тип</label><select class="form-select" id="docType" onclick="event.stopPropagation()"><option>PDF</option><option>DOCX</option><option>XLSX</option><option>TXT</option><option>MD</option><option>ZIP</option><option>PNG</option><option>JPG</option></select></div>
-                            <div class="form-group"><label class="form-label">Размер</label><input type="text" class="form-input" id="docSize" placeholder="245 KB" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="docType">Тип</label><select class="form-select" id="docType" onclick="event.stopPropagation()"><option>PDF</option><option>DOCX</option><option>XLSX</option><option>TXT</option><option>MD</option><option>ZIP</option><option>PNG</option><option>JPG</option></select></div>
+                            <div class="form-group"><label class="form-label" for="docSize">Размер</label><input type="text" class="form-input" id="docSize" placeholder="245 KB" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Файл</label>
+                            <label class="form-label" for="fileInput">Файл</label>
                             <div id="dropZone" style="border:2px dashed var(--gray-300);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:all 0.2s;" onclick="document.getElementById('fileInput').click()">
                                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" stroke-width="1.5" style="margin:0 auto 8px;display:block;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                                 <p class="fw-600 text-muted" id="fileLabel">Нажмите или перетащите файл</p>
@@ -298,18 +299,23 @@
         }
         
         window.uploadDocument = async function() {
-            const name = document.getElementById('docName').value.trim();
-            const isTemplate = currentTab === 'template';
-            
-            if (!name) { showToast('Введите название файла', 'error'); return; }
-            
-            const doc_category = isTemplate ? 'template' : 'client';
-            const project_id = isTemplate ? null : document.getElementById('docProject')?.value;
-            const template_category = isTemplate ? document.getElementById('templateCategory')?.value : null;
-            
-            if (!isTemplate && !project_id) { showToast('Выберите проект', 'error'); return; }
-            
-            try {
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                const isTemplate = currentTab === 'template';
+                
+                if (!validateForm([
+                    { id: 'docName', required: true, message: 'Введите название файла' }
+                ])) return;
+                
+                const name = document.getElementById('docName').value.trim();
+                
+                const doc_category = isTemplate ? 'template' : 'client';
+                const project_id = isTemplate ? null : document.getElementById('docProject')?.value;
+                const template_category = isTemplate ? document.getElementById('templateCategory')?.value : null;
+                
+                if (!isTemplate && !project_id) { showToast('Выберите проект', 'error'); return; }
+                
                 if (selectedFile) {
                     const formData = new FormData();
                     formData.append('file', selectedFile);
@@ -345,9 +351,7 @@
                 selectedFile = null;
                 showToast('Документ загружен', 'success');
                 renderTabContent();
-            } catch (err) {
-                showToast('Ошибка: ' + err.message, 'error');
-            }
+            });
         };
         
         await CRM.load();

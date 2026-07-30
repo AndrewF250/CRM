@@ -1,6 +1,34 @@
 /**
  * CRM API Client with Authentication
  */
+
+// ==================== LOADING BAR ====================
+const LoadingBar = {
+    _el: null,
+    _count: 0,
+
+    _ensure() {
+        if (this._el) return;
+        this._el = document.createElement('div');
+        this._el.id = 'loadingBar';
+        this._el.innerHTML = '<div class="loading-bar-progress"></div>';
+        document.body.prepend(this._el);
+    },
+
+    show() {
+        this._ensure();
+        this._count++;
+        this._el.classList.add('active');
+    },
+
+    hide() {
+        this._count = Math.max(0, this._count - 1);
+        if (this._count === 0 && this._el) {
+            this._el.classList.remove('active');
+        }
+    }
+};
+
 const API = {
     baseUrl: '/api',
     token: localStorage.getItem('crm_token'),
@@ -47,7 +75,8 @@ const API = {
             },
             ...options
         };
-        
+
+        LoadingBar.show();
         try {
             const response = await fetch(url, config);
             if (response.status === 401) {
@@ -63,6 +92,8 @@ const API = {
         } catch (err) {
             console.error('API Error:', err);
             throw err;
+        } finally {
+            LoadingBar.hide();
         }
     },
 
@@ -139,17 +170,31 @@ const API = {
     },
 
     // Stats
-    async getStats() { return this.request('/stats'); }
+    async getStats() { return this.request('/stats'); },
+
+    // Convenience methods
+    async get(url) { return this.request(url.replace('/api', '')); },
+    async post(url, data) { return this.request(url.replace('/api', ''), { method: 'POST', body: JSON.stringify(data) }); },
+    async put(url, data) { return this.request(url.replace('/api', ''), { method: 'PUT', body: JSON.stringify(data) }); },
+    async delete(url) { return this.request(url.replace('/api', ''), { method: 'DELETE' }); }
 };
 
 // Toast
 function showToast(msg, type = 'success') {
+    const icons = {
+        success: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>',
+        error: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+        info: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+    };
+    const colors = { success: '#10B981', error: '#EF4444', info: '#4F46E5' };
+
     const t = document.createElement('div');
-    t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;padding:14px 24px;border-radius:10px;font-size:0.9rem;font-weight:600;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.2);transition:opacity 0.3s;';
-    t.style.background = type === 'success' ? '#10B981' : type === 'error' ? '#EF4444' : '#4F46E5';
-    t.textContent = msg;
+    t.className = 'toast-item';
+    t.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:10px;padding:14px 20px;border-radius:10px;font-size:0.875rem;font-weight:500;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.2);transition:all 0.3s ease;max-width:400px;`;
+    t.style.background = colors[type] || colors.info;
+    t.innerHTML = `<span style="flex-shrink:0;display:flex;">${icons[type] || icons.info}</span><span style="flex:1;">${msg}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;padding:2px;margin-left:8px;font-size:1.1rem;line-height:1;" aria-label="Закрыть">&times;</button>`;
     document.body.appendChild(t);
-    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2500);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(10px)'; setTimeout(() => t.remove(), 300); }, 4000);
 }
 
 // Modals
