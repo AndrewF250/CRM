@@ -20,15 +20,8 @@ function toggleTheme() {
         document.documentElement.setAttribute('data-theme', 'dark');
         localStorage.setItem('crm_theme', 'dark');
     }
-    // Re-render header to update icon
-    const headerEl = document.querySelector('.header');
-    if (headerEl) {
-        const wrapper = headerEl.parentElement;
-        if (wrapper) {
-            wrapper.outerHTML = renderHeader();
-            initCommonUI();
-        }
-    }
+    // Reload to apply theme to all inline-styled elements
+    location.reload();
 }
 
 // ==================== SIDEBAR COMPONENT ====================
