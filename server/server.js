@@ -402,6 +402,61 @@ app.delete('/api/kanban-columns/:id', requireAuth, (req, res) => {
   }
 });
 
+// ==================== TASK COLUMNS API ====================
+
+app.get('/api/task-columns', requireAuth, (req, res) => {
+  try {
+    const columns = db.prepare('SELECT * FROM task_columns ORDER BY sort_order').all();
+    res.json(columns);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/task-columns', requireAuth, (req, res) => {
+  try {
+    const { name, color } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
+    const maxOrder = db.prepare('SELECT MAX(sort_order) as max FROM task_columns').get();
+    const sortOrder = (maxOrder.max || 0) + 1;
+    const result = db.prepare('INSERT INTO task_columns (name, color, sort_order) VALUES (?, ?, ?)').run(name.trim(), color || 'blue', sortOrder);
+    const column = db.prepare('SELECT * FROM task_columns WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(column);
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Статус с таким названием уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/task-columns/:id', requireAuth, (req, res) => {
+  try {
+    const { name, color, sort_order } = req.body;
+    const existing = db.prepare('SELECT * FROM task_columns WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Статус не найден' });
+    db.prepare('UPDATE task_columns SET name = ?, color = ?, sort_order = ? WHERE id = ?').run(
+      name || existing.name, color || existing.color, sort_order !== undefined ? sort_order : existing.sort_order, req.params.id
+    );
+    const column = db.prepare('SELECT * FROM task_columns WHERE id = ?').get(req.params.id);
+    res.json(column);
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Статус с таким названием уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/task-columns/:id', requireAuth, (req, res) => {
+  try {
+    const column = db.prepare('SELECT * FROM task_columns WHERE id = ?').get(req.params.id);
+    if (!column) return res.status(404).json({ error: 'Статус не найден' });
+    const tasksUsing = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE column_status = ?').get(column.name);
+    if (tasksUsing.count > 0) return res.status(400).json({ error: `Статус "${column.name}" используется ${tasksUsing.count} задачами. Сначала переместите их.` });
+    db.prepare('DELETE FROM task_columns WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== SUBTASKS API ====================
 
 app.get('/api/tasks/:taskId/subtasks', requireAuth, (req, res) => {

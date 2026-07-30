@@ -161,4 +161,14 @@ db.exec(`
   );
 `);
 
+// Create task_columns table for configurable task statuses
+db.exec(`
+  CREATE TABLE IF NOT EXISTS task_columns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT DEFAULT 'blue',
+    sort_order INTEGER DEFAULT 0
+  );
+`);
+
 module.exports = db;

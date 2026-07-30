@@ -141,6 +141,14 @@ const kanbanColumns = [
     { name: 'Выполнено', color: 'gray', sort_order: 4 },
 ];
 
+const taskColumns = [
+    { name: 'Ожидает', color: 'gray', sort_order: 0 },
+    { name: 'В работе', color: 'green', sort_order: 1 },
+    { name: 'Простой', color: 'yellow', sort_order: 2 },
+    { name: 'Согласуем', color: 'yellow', sort_order: 3 },
+    { name: 'Готово', color: 'gray', sort_order: 4 },
+];
+
 const insertProject = db.prepare(`
     INSERT OR REPLACE INTO projects (id, name, client, phone, amount, status, urgent, deadline, progress, pay_status, pay_method, discount, discount_val, adequacy, source, description, hashtags)
     VALUES (@id, @name, @client, @phone, @amount, @status, @urgent, @deadline, @progress, @pay_status, @pay_method, @discount, @discount_val, @adequacy, @source, @description, @hashtags)
@@ -156,11 +164,17 @@ const insertColumn = db.prepare(`
     VALUES (@name, @color, @sort_order)
 `);
 
+const insertTaskColumn = db.prepare(`
+    INSERT OR IGNORE INTO task_columns (name, color, sort_order)
+    VALUES (@name, @color, @sort_order)
+`);
+
 const insertMany = db.transaction(() => {
     for (const p of projects) insertProject.run(p);
     for (const t of tasks) insertTask.run(t);
     for (const c of kanbanColumns) insertColumn.run(c);
+    for (const c of taskColumns) insertTaskColumn.run(c);
 });
 
 insertMany();
-console.log(`Заполнено: ${projects.length} проектов, ${tasks.length} задач, ${kanbanColumns.length} колонок.`);
+console.log(`Заполнено: ${projects.length} проектов, ${tasks.length} задач, ${kanbanColumns.length} колонок проектов, ${taskColumns.length} статусов задач.`);

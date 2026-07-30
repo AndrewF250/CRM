@@ -27,6 +27,22 @@
         .activity-time { font-size: 0.75rem; color: var(--gray-400); margin-top: 2px; }
         .layout-2col { display: grid; grid-template-columns: 1fr 350px; gap: 24px; }
         @media (max-width: 1200px) { .layout-2col { grid-template-columns: 1fr; } }
+        .task-actions { display: flex; gap: 4px; align-items: center; }
+        .task-action-btn {
+            width: 32px; height: 32px; border-radius: var(--radius-md);
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid var(--gray-200); background: var(--white);
+            color: var(--gray-500); cursor: pointer; transition: all 0.15s;
+        }
+        .task-action-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+        .task-action-btn.done:hover { border-color: var(--success); color: var(--success); background: var(--success-light); }
+        .task-action-btn.pause:hover { border-color: var(--warning); color: var(--warning); background: var(--warning-light); }
+        .task-action-btn.play { border-color: var(--success); color: var(--success); }
+        .task-action-btn.play:hover { background: var(--success-light); }
+        .task-action-btn.restart:hover { border-color: var(--info); color: var(--info); background: var(--info-light); }
+        .task-action-btn.gear:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-100); }
+        .task-action-btn.unparent { font-size: 0.8rem; font-weight: 700; }
+        .task-card.paused { border-left: 3px solid var(--warning); }
     </style>
 </head>
 <body>
@@ -43,10 +59,14 @@
         const app = document.getElementById('app');
         app.innerHTML = renderSidebar('tasks') + renderHeader() + `
             <div class="page-header">
-                <div><h1 class="page-title">Задачи</h1><p class="page-subtitle">Все задачи по проектам</p></div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <h1 class="page-title">Задачи</h1>
+                    <button class="btn btn-ghost btn-icon" onclick="showTaskColumnConfigModal()" title="Настройки статусов" aria-label="Настройки статусов" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+                    <p class="page-subtitle">Все задачи по проектам</p>
+                </div>
                 <div class="page-actions"><button class="btn btn-primary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новая задача</button></div>
             </div>
-            <div class="filter-bar"><span class="text-sm text-muted" style="margin-right:4px;">Статус:</span><button class="filter-chip active" onclick="filterTasks('all', this)">Все</button><button class="filter-chip" onclick="filterTasks('work', this)">В работе</button><button class="filter-chip" onclick="filterTasks('done', this)">Выполнено</button></div>
+            <div class="filter-bar" id="taskFilters" style="flex-wrap:wrap;"></div>
             <div class="layout-2col">
                 <div id="tasksList"></div>
                 <div id="activityFeed">
@@ -61,13 +81,53 @@
         
         initCommonUI();
         await CRM.load();
-        
+
         let currentFilter = 'all';
+        let currentTimeFilter = 'all';
+        let taskColumns = [];
+
+        // Load task columns
+        async function loadTaskColumns() {
+            try {
+                taskColumns = await API.get('/api/task-columns');
+            } catch (err) {
+                taskColumns = [
+                    { id: 1, name: 'Ожидает', color: 'gray', sort_order: 0 },
+                    { id: 2, name: 'В работе', color: 'green', sort_order: 1 },
+                    { id: 3, name: 'Простой', color: 'yellow', sort_order: 2 },
+                    { id: 4, name: 'Согласуем', color: 'yellow', sort_order: 3 },
+                    { id: 5, name: 'Готово', color: 'gray', sort_order: 4 }
+                ];
+            }
+        }
+        await loadTaskColumns();
+
+        function renderTaskFilters() {
+            const container = document.getElementById('taskFilters');
+            let html = '<span class="text-sm text-muted" style="margin-right:4px;">Статус:</span>';
+            html += `<button class="filter-chip${currentFilter === 'all' ? ' active' : ''}" onclick="filterTasks('all', this)">Все</button>`;
+            taskColumns.forEach(col => {
+                html += `<button class="filter-chip${currentFilter === col.name ? ' active' : ''}" onclick="filterTasks('${col.name}', this)">${col.name}</button>`;
+            });
+            html += '<span class="text-sm text-muted" style="margin-left:16px;margin-right:4px;">Время:</span>';
+            html += `<button class="filter-chip${currentTimeFilter === 'all' ? ' active' : ''}" onclick="filterTime('all', this)">Все</button>`;
+            html += `<button class="filter-chip${currentTimeFilter === 'today' ? ' active' : ''}" onclick="filterTime('today', this)">Сегодня</button>`;
+            html += `<button class="filter-chip${currentTimeFilter === 'tomorrow' ? ' active' : ''}" onclick="filterTime('tomorrow', this)">Завтра</button>`;
+            html += `<button class="filter-chip${currentTimeFilter === 'week' ? ' active' : ''}" onclick="filterTime('week', this)">Неделя</button>`;
+            html += `<button class="filter-chip${currentTimeFilter === 'overdue' ? ' active' : ''}" onclick="filterTime('overdue', this)">Просроченные</button>`;
+            container.innerHTML = html;
+        }
+        renderTaskFilters();
         
         window.filterTasks = function(filter, btn) {
             currentFilter = filter;
-            document.querySelectorAll('.filter-bar .filter-chip').forEach(c => c.classList.remove('active'));
-            btn.classList.add('active');
+            renderTaskFilters();
+            renderTasks();
+        };
+
+        window.filterTime = function(filter, btn) {
+            currentTimeFilter = filter;
+            renderTaskFilters();
             renderTasks();
         };
         
@@ -95,6 +155,109 @@
             } catch (err) {
                 showToast('Ошибка', 'error');
             }
+        };
+
+        window.toggleTaskDone = async function(taskId) {
+            try {
+                await CRM.updateTask(taskId, { done: true, column_status: 'Готово' });
+                showToast('Задача выполнена', 'success');
+                await CRM.load();
+                renderTasks();
+                loadActivity();
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+
+        window.toggleTaskPause = async function(taskId) {
+            try {
+                const task = CRM.getTasks().find(t => t.id === taskId);
+                if (!task) return;
+                const newStatus = task.column_status === 'Простой' ? 'В работе' : 'Простой';
+                await CRM.updateTask(taskId, { column_status: newStatus });
+                showToast(newStatus === 'Простой' ? 'Задача на паузе' : 'Задача в работе', 'success');
+                await CRM.load();
+                renderTasks();
+                loadActivity();
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+
+        window.restartTask = async function(taskId) {
+            try {
+                await CRM.updateTask(taskId, { done: false, column_status: 'В работе' });
+                showToast('Задача возвращена в работу', 'success');
+                await CRM.load();
+                renderTasks();
+                loadActivity();
+            } catch (err) {
+                showToast('Ошибка', 'error');
+            }
+        };
+
+        window.showEditTaskModal = function(taskId) {
+            const task = CRM.getTasks().find(t => t.id === taskId);
+            if (!task) return;
+            const overlay = document.getElementById('modalOverlay');
+            let projectOptions = '';
+            CRM.getProjects().forEach(p => {
+                projectOptions += `<option value="${p.id}" ${task.project_id === p.id ? 'selected' : ''}>${p.client} — ${p.name}</option>`;
+            });
+            let statusOptions = '';
+            taskColumns.forEach(col => {
+                statusOptions += `<option value="${col.name}" ${task.column_status === col.name ? 'selected' : ''}>${col.name}</option>`;
+            });
+
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Редактировать задачу</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="editTaskProject">Проект</label><select class="form-select" id="editTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
+                            <div class="form-group"><label class="form-label" for="editTaskPerson">Ответственный</label><select class="form-select" id="editTaskPerson" onclick="event.stopPropagation()"><option ${task.person === 'Костя' ? 'selected' : ''}>Костя</option><option ${task.person === 'Максим' ? 'selected' : ''}>Максим</option><option ${task.person === 'Андрей' ? 'selected' : ''}>Андрей</option></select></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="editTaskStatus">Статус</label><select class="form-select" id="editTaskStatus" onclick="event.stopPropagation()">${statusOptions}</select></div>
+                            <div class="form-group"><label class="form-label" for="editTaskDate">Дата</label><input type="date" class="form-input" id="editTaskDate" value="${task.date && task.date !== '—' ? task.date : ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editTaskTime">Время</label><input type="time" class="form-input" id="editTaskTime" value="${task.time || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                        <div class="form-group"><label class="form-check"><input type="checkbox" id="editTaskUrgent" ${task.urgent ? 'checked' : ''} onclick="event.stopPropagation()"> Срочно</label></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="saveTaskEdit('${taskId}')">Сохранить</button></div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+
+        window.saveTaskEdit = async function(taskId) {
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([{ id: 'editTaskName', required: true, message: 'Введите название' }])) return;
+                const name = document.getElementById('editTaskName').value.trim();
+                const column_status = document.getElementById('editTaskStatus').value;
+                const done = column_status === 'Готово';
+
+                await CRM.updateTask(taskId, {
+                    name: name,
+                    project_id: document.getElementById('editTaskProject').value,
+                    person: document.getElementById('editTaskPerson').value,
+                    column_status: column_status,
+                    date: document.getElementById('editTaskDate').value || '—',
+                    time: document.getElementById('editTaskTime').value || '',
+                    done: done,
+                    urgent: document.getElementById('editTaskUrgent').checked
+                });
+
+                closeModal();
+                showToast('Задача обновлена', 'success');
+                await CRM.load();
+                renderTasks();
+                loadActivity();
+            });
         };
         
         window.toggleSubtask = async function(subtaskId, done) {
@@ -133,8 +296,30 @@
         
         async function renderTasks() {
             let tasks = CRM.getTasks();
-            if (currentFilter === 'work') tasks = tasks.filter(t => !t.done);
-            if (currentFilter === 'done') tasks = tasks.filter(t => t.done);
+            if (currentFilter !== 'all') tasks = tasks.filter(t => t.column_status === currentFilter);
+
+            // Time filter
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+            const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+
+            if (currentTimeFilter === 'today') {
+                tasks = tasks.filter(t => t.date && new Date(t.date).toDateString() === today.toDateString());
+            } else if (currentTimeFilter === 'tomorrow') {
+                tasks = tasks.filter(t => t.date && new Date(t.date).toDateString() === tomorrow.toDateString());
+            } else if (currentTimeFilter === 'week') {
+                tasks = tasks.filter(t => {
+                    if (!t.date || t.date === '—') return false;
+                    const d = new Date(t.date);
+                    return d >= today && d <= weekEnd;
+                });
+            } else if (currentTimeFilter === 'overdue') {
+                tasks = tasks.filter(t => {
+                    if (!t.date || t.date === '—' || t.done) return false;
+                    return new Date(t.date) < today;
+                });
+            }
             
             if (tasks.length === 0) {
                 document.getElementById('tasksList').innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:40px;"><p class="text-muted">Нет задач</p><button class="btn btn-primary" style="margin-top:16px;" onclick="showNewTaskModal()">Создать первую задачу</button></div></div>';
@@ -163,14 +348,29 @@
                 const subtasks = allSubtasks[t.id] || [];
                 const doneSubtasks = subtasks.filter(s => s.done).length;
                 const children = childrenMap[t.id] || [];
-                
-                let html = `<div class="task-card${t.done ? ' done' : ''}${isChild ? ' child' : ''}" data-task-id="${t.id}" draggable="true">
+                const isPaused = t.column_status === 'Простой';
+                const isDone = t.done;
+
+                // Action buttons
+                let actionBtns = '';
+                if (isDone) {
+                    actionBtns += `<button class="task-action-btn restart" onclick="restartTask('${t.id}')" title="Вернуть в работу" aria-label="Вернуть в работу"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 105.93-12.55L1 10"/></svg></button>`;
+                } else {
+                    actionBtns += `<button class="task-action-btn done" onclick="toggleTaskDone('${t.id}')" title="Выполнено" aria-label="Выполнено"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg></button>`;
+                    if (isPaused) {
+                        actionBtns += `<button class="task-action-btn play" onclick="toggleTaskPause('${t.id}')" title="Продолжить" aria-label="Продолжить"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>`;
+                    } else {
+                        actionBtns += `<button class="task-action-btn pause" onclick="toggleTaskPause('${t.id}')" title="Пауза" aria-label="Пауза"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>`;
+                    }
+                }
+                actionBtns += `<button class="task-action-btn gear" onclick="showEditTaskModal('${t.id}')" title="Настройки" aria-label="Настройки"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg></button>`;
+
+                let html = `<div class="task-card${isDone ? ' done' : ''}${isChild ? ' child' : ''}${isPaused ? ' paused' : ''}" data-task-id="${t.id}" draggable="true">
                     <div style="display:flex;align-items:flex-start;gap:12px;">
-                        <input type="checkbox" class="subtask-checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)" style="margin-top:2px;">
                         <div style="flex:1;">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                                 <div>
-                                    <div class="task-name" style="font-weight:600;font-size:0.95rem;${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
+                                    <div class="task-name" style="font-weight:600;font-size:0.95rem;${isDone ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
                                     <div style="display:flex;align-items:center;gap:8px;margin-top:4px;font-size:0.8rem;color:var(--gray-500);">
                                         <a href="/pages/project.html?id=${t.project_id}" style="color:var(--primary);text-decoration:none;">${project ? project.name : ''}</a>
                                         <span>·</span>
@@ -178,14 +378,14 @@
                                         <span>·</span>
                                         <span>${t.date || ''} ${t.time || ''}</span>
                                         ${t.urgent ? '<span class="badge badge-danger" style="font-size:0.65rem;">СРОЧНО</span>' : ''}
+                                        ${isPaused ? '<span class="badge badge-warning" style="font-size:0.65rem;">ПРОСТОЙ</span>' : ''}
                                         ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + ' подзадач</span>' : ''}
                                     </div>
                                     ${subtasks.length > 0 ? '<div style="margin-top:4px;font-size:0.75rem;color:var(--gray-400);">Чеклист: ' + doneSubtasks + '/' + subtasks.length + '</div>' : ''}
                                 </div>
-                                <div style="display:flex;gap:4px;align-items:center;">
-                                    ${isChild ? '<button class="task-unparent" onclick="unparentTask(\'' + t.id + '\')" title="Сделать самостоятельной" aria-label="Сделать самостоятельной">↑ открепить</button>' : ''}
-                                    <button class="btn btn-ghost btn-sm" onclick="showAddSubtaskModal('${t.id}')" title="Добавить подзадачу" aria-label="Добавить подзадачу">+</button>
-                                    <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteTask('${t.id}')" title="Удалить" aria-label="Удалить">✕</button>
+                                <div class="task-actions">
+                                    ${isChild ? '<button class="task-action-btn unparent" onclick="unparentTask(\'' + t.id + '\')" title="Открепить" aria-label="Открепить">↑</button>' : ''}
+                                    ${actionBtns}
                                 </div>
                             </div>
                             ${subtasks.length > 0 ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);">' + subtasks.map(s => `
@@ -419,6 +619,118 @@
             } catch (err) {
                 showToast(err.message || 'Ошибка', 'error');
             }
+        };
+
+        // ===== TASK COLUMN CONFIGURATION =====
+        window.showTaskColumnConfigModal = async function() {
+            await loadTaskColumns();
+            const overlay = document.getElementById('modalOverlay');
+            const colors = ['blue', 'yellow', 'green', 'gray', 'red', 'purple'];
+            const colorLabels = { blue: 'Синий', yellow: 'Жёлтый', green: 'Зелёный', gray: 'Серый', red: 'Красный', purple: 'Фиолетовый' };
+            const colorDotsCSS = { blue: 'var(--info)', yellow: 'var(--warning)', green: 'var(--success)', gray: 'var(--gray-400)', red: 'var(--danger)', purple: 'var(--primary)' };
+
+            function renderColList() {
+                return taskColumns.map(c => `
+                    <div class="col-config-item" data-col-id="${c.id}" draggable="true">
+                        <div class="col-config-handle" title="Перетащить для изменения порядка">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+                        </div>
+                        <div class="col-config-dot" style="background:${colorDotsCSS[c.color] || 'var(--gray-400)'}"></div>
+                        <div class="col-config-name">${c.name}</div>
+                        <select class="form-select" style="width:auto;padding:2px 6px;font-size:0.75rem;" onchange="updateTaskColumnColor(${c.id}, this.value)">
+                            ${colors.map(cl => `<option value="${cl}" ${c.color === cl ? 'selected' : ''}>${colorLabels[cl]}</option>`).join('')}
+                        </select>
+                        <button class="btn btn-ghost btn-sm" style="color:var(--danger);padding:2px 6px;" onclick="deleteTaskColumn(${c.id})" aria-label="Удалить">✕</button>
+                    </div>
+                `).join('');
+            }
+
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Настройка статусов задач</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <div style="font-size:0.8rem;color:var(--gray-500);margin-bottom:12px;">Перетащите статусы для изменения порядка</div>
+                        <div id="taskColConfigList">${renderColList()}</div>
+                        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200);">
+                            <div style="font-weight:600;font-size:0.85rem;margin-bottom:8px;">Добавить статус</div>
+                            <div style="display:flex;gap:8px;">
+                                <input type="text" class="form-input" id="newTaskColName" placeholder="Название" style="flex:1;">
+                                <select class="form-select" id="newTaskColColor" style="width:auto;">
+                                    ${colors.map(cl => `<option value="${cl}">${colorLabels[cl]}</option>`).join('')}
+                                </select>
+                                <button class="btn btn-primary btn-sm" onclick="addTaskColumn()">Добавить</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+            initTaskColumnDragDrop();
+        };
+
+        function initTaskColumnDragDrop() {
+            const list = document.getElementById('taskColConfigList');
+            if (!list) return;
+            let draggedEl = null;
+            list.querySelectorAll('.col-config-item').forEach(item => {
+                item.addEventListener('dragstart', (e) => {
+                    draggedEl = item; item.classList.add('col-dragging');
+                    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', item.dataset.colId);
+                });
+                item.addEventListener('dragend', () => {
+                    item.classList.remove('col-dragging');
+                    document.querySelectorAll('.col-drag-over').forEach(el => el.classList.remove('col-drag-over'));
+                    draggedEl = null;
+                });
+                item.addEventListener('dragover', (e) => { e.preventDefault(); if (draggedEl && draggedEl !== item) item.classList.add('col-drag-over'); });
+                item.addEventListener('dragleave', () => { item.classList.remove('col-drag-over'); });
+                item.addEventListener('drop', async (e) => {
+                    e.preventDefault(); item.classList.remove('col-drag-over');
+                    if (!draggedEl || draggedEl === item) return;
+                    const rect = item.getBoundingClientRect();
+                    if (e.clientY < rect.top + rect.height / 2) list.insertBefore(draggedEl, item);
+                    else list.insertBefore(draggedEl, item.nextSibling);
+                    await saveTaskColumnOrder();
+                });
+            });
+        }
+
+        async function saveTaskColumnOrder() {
+            const items = document.querySelectorAll('#taskColConfigList .col-config-item');
+            for (let i = 0; i < items.length; i++) {
+                await API.put(`/api/task-columns/${items[i].dataset.colId}`, { sort_order: i });
+            }
+            await loadTaskColumns();
+            renderTaskFilters();
+        }
+
+        window.addTaskColumn = async function() {
+            const name = document.getElementById('newTaskColName').value.trim();
+            const color = document.getElementById('newTaskColColor').value;
+            if (!name) { showToast('Введите название', 'error'); return; }
+            try {
+                await API.post('/api/task-columns', { name, color });
+                showToast('Статус добавлен', 'success');
+                await loadTaskColumns();
+                renderTaskFilters();
+                showTaskColumnConfigModal();
+            } catch (err) { showToast(err.message || 'Ошибка', 'error'); }
+        };
+
+        window.updateTaskColumnColor = async function(id, color) {
+            try { await API.put(`/api/task-columns/${id}`, { color }); await loadTaskColumns(); renderTaskFilters(); }
+            catch (err) { showToast('Ошибка', 'error'); }
+        };
+
+        window.deleteTaskColumn = async function(id) {
+            try {
+                await API.delete(`/api/task-columns/${id}`);
+                showToast('Статус удалён', 'success');
+                await loadTaskColumns();
+                renderTaskFilters();
+                showTaskColumnConfigModal();
+            } catch (err) { showToast(err.message || 'Ошибка', 'error'); }
         };
     })();
     </script>
