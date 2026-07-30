@@ -38,9 +38,10 @@
                 <button class="filter-chip" onclick="filterProjects('Новый', this)">Новые</button>
                 <button class="filter-chip" onclick="filterProjects('Выполнено', this)">Выполнено</button>
                 <span class="text-sm text-muted" style="margin-left:12px;margin-right:4px;">Хештег:</span>
-                <select class="form-select" id="hashtagFilter" onchange="filterByHashtag(this.value)" style="width:auto;padding:4px 8px;font-size:0.8rem;">
-                    <option value="">Все хештеги</option>
-                </select>
+                <div class="hashtag-search-wrapper">
+                    <input type="text" class="form-input" id="hashtagFilter" placeholder="Поиск по хештегу..." style="width:180px;padding:4px 8px;font-size:0.8rem;" autocomplete="off">
+                    <div class="hashtag-dropdown" id="hashtagDropdown"></div>
+                </div>
             </div>
             <div id="kanbanView"></div>
             <div id="tableView" class="hidden"></div>
@@ -53,14 +54,68 @@
         if (contentWrapper) contentWrapper.classList.add('full-width');
         await CRM.load();
         
-        // Load hashtags for filter
-        const hashtags = await API.gethashtags ? await API.gethashtags() : [];
-        const hashtagSelect = document.getElementById('hashtagFilter');
-        if (Array.isArray(hashtags)) {
-            hashtags.forEach(h => {
-                hashtagSelect.innerHTML += `<option value="${h}">${h}</option>`;
-            });
-        }
+        // Load hashtags for autocomplete
+        let allHashtags = [];
+        try {
+            const h = await API.gethashtags();
+            if (Array.isArray(h)) allHashtags = h;
+        } catch (err) {}
+
+        const hashtagInput = document.getElementById('hashtagFilter');
+        const hashtagDropdown = document.getElementById('hashtagDropdown');
+
+        hashtagInput.addEventListener('input', function() {
+            const val = this.value.trim().toLowerCase();
+            if (!val) {
+                hashtagDropdown.classList.remove('show');
+                currentHashtag = '';
+                renderProjects();
+                return;
+            }
+            const matches = allHashtags.filter(h => h.toLowerCase().includes(val));
+            if (matches.length > 0) {
+                hashtagDropdown.innerHTML = matches.map(h =>
+                    `<div class="hashtag-dropdown-item" data-tag="${h}">${h}</div>`
+                ).join('');
+                hashtagDropdown.classList.add('show');
+            } else {
+                hashtagDropdown.classList.remove('show');
+            }
+        });
+
+        hashtagInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                const val = this.value.trim();
+                if (val) {
+                    currentHashtag = val.startsWith('#') ? val : '#' + val;
+                    this.value = currentHashtag;
+                    hashtagDropdown.classList.remove('show');
+                    renderProjects();
+                }
+            }
+            if (e.key === 'Escape') {
+                this.value = '';
+                currentHashtag = '';
+                hashtagDropdown.classList.remove('show');
+                renderProjects();
+            }
+        });
+
+        hashtagDropdown.addEventListener('click', function(e) {
+            const item = e.target.closest('.hashtag-dropdown-item');
+            if (item) {
+                currentHashtag = item.dataset.tag;
+                hashtagInput.value = currentHashtag;
+                hashtagDropdown.classList.remove('show');
+                renderProjects();
+            }
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.hashtag-search-wrapper')) {
+                hashtagDropdown.classList.remove('show');
+            }
+        });
         
         let currentFilter = 'all';
         let currentHashtag = '';

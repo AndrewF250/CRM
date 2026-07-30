@@ -764,3 +764,20 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
     font-size: 0.75rem; color: var(--danger); margin-top: 4px; display: none;
 }
 .form-group.has-error .form-error { display: block; }
+
+/* === HASHTAG AUTOCOMPLETE === */
+.hashtag-search-wrapper { position: relative; display: inline-block; }
+.hashtag-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px;
+    background: var(--white); border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+    z-index: 100; display: none; max-height: 200px; overflow-y: auto;
+}
+.hashtag-dropdown.show { display: block; }
+.hashtag-dropdown-item {
+    padding: 8px 12px; font-size: 0.8rem; color: var(--gray-700);
+    cursor: pointer; transition: background 0.1s;
+}
+.hashtag-dropdown-item:hover { background: var(--primary-light); color: var(--primary); }
+.hashtag-dropdown-item:first-child { border-radius: var(--radius-md) var(--radius-md) 0 0; }
+.hashtag-dropdown-item:last-child { border-radius: 0 0 var(--radius-md) var(--radius-md); }
