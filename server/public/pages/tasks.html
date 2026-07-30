@@ -61,7 +61,7 @@
             <div class="page-header">
                 <div style="display:flex;align-items:center;gap:8px;">
                     <h1 class="page-title">Задачи</h1>
-                    <button class="btn btn-ghost btn-icon" onclick="showTaskColumnConfigModal()" title="Настройки статусов" aria-label="Настройки статусов" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+                    <button class="btn btn-ghost btn-icon" onclick="showTaskColumnConfigModal()" title="Настройки статусов" aria-label="Настройки статусов" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
                     <p class="page-subtitle">Все задачи по проектам</p>
                 </div>
                 <div class="page-actions"><button class="btn btn-primary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новая задача</button></div>
@@ -217,6 +217,7 @@
                     <div class="modal-header"><h3 class="modal-title">Редактировать задачу</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label" for="editTaskDesc">Описание</label><textarea class="form-textarea" id="editTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${task.description || ''}</textarea></div>
                         <div class="form-group">
                             <label class="form-label">Проект</label>
                             <div class="hashtag-search-wrapper" style="width:100%;">
@@ -272,7 +273,8 @@
                     time: document.getElementById('editTaskTime').value || '',
                     done: done,
                     urgent: false,
-                    priority: document.getElementById('editTaskPriority').value
+                    priority: document.getElementById('editTaskPriority').value,
+                    description: document.getElementById('editTaskDesc').value.trim()
                 });
 
                 closeModal();
@@ -386,7 +388,7 @@
                         actionBtns += `<button class="task-action-btn pause" onclick="toggleTaskPause('${t.id}')" title="Пауза" aria-label="Пауза"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>`;
                     }
                 }
-                actionBtns += `<button class="task-action-btn gear" onclick="showEditTaskModal('${t.id}')" title="Настройки" aria-label="Настройки"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg></button>`;
+                actionBtns += `<button class="task-action-btn gear" onclick="showEditTaskModal('${t.id}')" title="Настройки" aria-label="Настройки"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>`;
 
                 const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
                 const priorityLabel = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
@@ -398,9 +400,10 @@
                     <div style="display:flex;align-items:flex-start;gap:12px;">
                         <div style="flex:1;">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-                                <div>
+                                <div style="flex:1;min-width:0;">
                                     <div class="task-name" style="font-weight:600;font-size:0.95rem;${isDone ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
-                                    <div style="display:flex;align-items:center;gap:8px;margin-top:4px;font-size:0.8rem;color:var(--gray-500);">
+                                    ${t.description ? '<div style="font-size:0.82rem;color:var(--gray-500);margin-top:3px;line-height:1.4;white-space:pre-wrap;">' + t.description + '</div>' : ''}
+                                    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:0.8rem;color:var(--gray-500);flex-wrap:wrap;">
                                         ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" style="color:var(--primary);text-decoration:none;">' + project.name + '</a><span>·</span>' : ''}
                                         <span>${t.person}</span>
                                         <span>·</span>
@@ -499,6 +502,7 @@
                     <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label" for="newTaskDesc">Описание</label><textarea class="form-textarea" id="newTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></textarea></div>
                         <div class="form-group">
                             <label class="form-label">Проект</label>
                             <div class="hashtag-search-wrapper" style="width:100%;">
@@ -577,6 +581,7 @@
                     done: false,
                     urgent: false,
                     priority: document.getElementById('newTaskPriority').value,
+                    description: document.getElementById('newTaskDesc').value.trim(),
                     hashtags: []
                 });
 
@@ -904,8 +909,13 @@
         };
 
         window.updateTaskColumnColor = async function(id, color) {
-            try { await API.put(`/api/task-columns/${id}`, { color }); await loadTaskColumns(); renderTaskFilters(); }
-            catch (err) { showToast('Ошибка', 'error'); }
+            try {
+                await API.put(`/api/task-columns/${id}`, { color });
+                await loadTaskColumns();
+                renderTaskFilters();
+                const overlay = document.getElementById('modalOverlay');
+                if (overlay && overlay.classList.contains('show')) showTaskColumnConfigModal();
+            } catch (err) { showToast('Ошибка', 'error'); }
         };
 
         window.deleteTaskColumn = async function(id) {

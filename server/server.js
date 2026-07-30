@@ -261,7 +261,7 @@ app.get('/api/tasks', requireAuth, (req, res) => {
 
 app.post('/api/tasks', requireAuth, (req, res) => {
   try {
-    const { id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority } = req.body;
+    const { id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description } = req.body;
     const taskId = id || 'task_' + Date.now();
     
     // Validate parent_id
@@ -272,10 +272,10 @@ app.post('/api/tasks', requireAuth, (req, res) => {
       if (parent.project_id !== project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
     }
     
-    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       taskId, project_id || '', name, column_status || 'Ожидает', person || 'Костя',
-      date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium'
+      date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium', description || ''
     );
     
     if (project_id) updateProjectProgress(project_id);
@@ -290,7 +290,7 @@ app.post('/api/tasks', requireAuth, (req, res) => {
 
 app.put('/api/tasks/:id', requireAuth, (req, res) => {
   try {
-    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority } = req.body;
+    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description } = req.body;
     
     const old = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Задача не найдена' });
@@ -309,10 +309,10 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
       if (parent && parent.project_id !== old.project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
     }
     
-    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, updated_at=CURRENT_TIMESTAMP
+    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, description=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?`).run(
       name, column_status, person, date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0,
-      JSON.stringify(hashtags || []), newParentId, priority || 'medium', req.params.id
+      JSON.stringify(hashtags || []), newParentId, priority || 'medium', description || '', req.params.id
     );
     
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);

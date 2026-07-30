@@ -22,7 +22,7 @@
             <div class="page-header">
                 <div style="display:flex;align-items:center;gap:8px;">
                     <h1 class="page-title">Проекты</h1>
-                    <button class="btn btn-ghost btn-icon" onclick="showColumnConfigModal()" title="Настройки колонок" aria-label="Настройки колонок" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+                    <button class="btn btn-ghost btn-icon" onclick="showColumnConfigModal()" title="Настройки колонок" aria-label="Настройки колонок" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
                     <p class="page-subtitle">Управление заказами</p>
                 </div>
                 <div class="page-actions">
@@ -239,6 +239,11 @@
         }
         
         const colorDots = { blue: 'blue', yellow: 'yellow', green: 'green', gray: 'gray', red: 'red', purple: 'blue' };
+        const colorHexMap = { blue: '#3B82F6', yellow: '#F59E0B', green: '#10B981', gray: '#9CA3AF', red: '#EF4444', purple: '#8B5CF6', pink: '#EC4899', orange: '#F97316', teal: '#14B8A6', indigo: '#6366F1', lime: '#84CC16', cyan: '#06B6D4' };
+        function getColHex(color) { return colorHexMap[color] || (color && color.startsWith('#') ? color : '#9CA3AF'); }
+        function isHexColor(color) { return color && color.startsWith('#'); }
+        function dotStyle(color) { return isHexColor(color) ? `background:${color}` : ''; }
+        function dotClass(color) { return isHexColor(color) ? '' : (colorDots[color] || 'gray'); }
         const avatarColors = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
         function getAvatarColor(name) {
             let hash = 0;
@@ -260,8 +265,8 @@
             let kanbanHtml = '<div class="kanban-board">';
             kanbanColumns.forEach(col => {
                 const colProjects = projects.filter(p => p.status === col.name);
-                const dot = colorDots[col.color] || 'gray';
-                kanbanHtml += `<div class="kanban-column"><div class="kanban-column-header"><div class="kanban-column-title"><span class="status-dot ${dot}"></span> ${col.name} <span class="kanban-count">${colProjects.length}</span></div></div><div class="kanban-column-body" data-column="${col.name}">`;
+                const hex = getColHex(col.color);
+                kanbanHtml += `<div class="kanban-column"><div class="kanban-column-header"><div class="kanban-column-title"><span class="status-dot" style="background:${hex}"></span> ${col.name} <span class="kanban-count">${colProjects.length}</span></div></div><div class="kanban-column-body" data-column="${col.name}">`;
                 colProjects.forEach(p => {
                     const adeqEmoji = { 'good': '😊', 'warn': '😐', 'bad': '😡' };
                     kanbanHtml += `<div class="kanban-card${p.urgent ? ' urgent' : ''}" draggable="true" data-project-id="${p.id}">
@@ -277,7 +282,7 @@
                             <div class="kanban-card-client">${p.client}${p.phone ? ' · ' + p.phone : ''}</div>
                             ${renderTeamAvatars(p.team, false)}
                             ${(p.hashtags && p.hashtags.length > 0) ? '<div class="hashtags" style="margin:4px 0;">' + p.hashtags.map(h => '<span class="hashtag">' + h + '</span>').join('') + '</div>' : ''}
-                            <div class="kanban-card-footer"><span class="kanban-card-status"><span class="status-dot ${dot}"></span> ${col.name}</span><span class="kanban-card-amount">${formatAmountInput(p.amount)} ₽</span></div>
+                            <div class="kanban-card-footer"><span class="kanban-card-status"><span class="status-dot" style="background:${hex}"></span> ${col.name}</span><span class="kanban-card-amount">${formatAmountInput(p.amount)} ₽</span></div>
                         </a>
                     </div>`;
                 });
@@ -666,6 +671,11 @@
                 await loadColumns();
                 renderStatusFilters();
                 renderProjects();
+                // Refresh modal if open
+                const overlay = document.getElementById('modalOverlay');
+                if (overlay && overlay.classList.contains('show')) {
+                    showColumnConfigModal();
+                }
             } catch (err) {
                 showToast('Ошибка', 'error');
             }

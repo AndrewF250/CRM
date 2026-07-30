@@ -165,6 +165,13 @@ try {
   db.exec("ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'");
 }
 
+// Migration: add description to tasks
+try {
+  db.prepare("SELECT description FROM tasks LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE tasks ADD COLUMN description TEXT DEFAULT ''");
+}
+
 // Create kanban_columns table for configurable project columns
 db.exec(`
   CREATE TABLE IF NOT EXISTS kanban_columns (
