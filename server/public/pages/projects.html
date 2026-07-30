@@ -20,32 +20,20 @@
         const app = document.getElementById('app');
         app.innerHTML = renderSidebar('projects') + renderHeader() + `
             <div class="page-header">
-                <div><h1 class="page-title">Проекты</h1><p class="page-subtitle">Управление заказами</p></div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <h1 class="page-title">Проекты</h1>
+                    <button class="btn btn-ghost btn-icon" onclick="showColumnConfigModal()" title="Настройки колонок" aria-label="Настройки колонок" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+                    <p class="page-subtitle">Управление заказами</p>
+                </div>
                 <div class="page-actions">
                     <div style="display:flex;gap:4px;">
                         <button class="btn btn-secondary btn-sm" id="viewKanban" onclick="switchView('kanban')" style="background:var(--primary-light);color:var(--primary);border-color:var(--primary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> Канбан</button>
                         <button class="btn btn-secondary btn-sm" id="viewTable" onclick="switchView('table')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg> Таблица</button>
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="showColumnConfigModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33"/></svg> Колонки</button>
                     <button class="btn btn-primary" onclick="showNewProjectModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новый проект</button>
                 </div>
             </div>
-            <div class="filter-bar" style="flex-wrap:wrap;">
-                <span class="text-sm text-muted" style="margin-right:4px;">Статус:</span>
-                <button class="filter-chip active" onclick="filterProjects('all', this)">Все</button>
-                <button class="filter-chip" onclick="filterProjects('В работе', this)">В работе</button>
-                <button class="filter-chip" onclick="filterProjects('Переговоры', this)">Переговоры</button>
-                <button class="filter-chip" onclick="filterProjects('Новый', this)">Новые</button>
-                <button class="filter-chip" onclick="filterProjects('Выполнено', this)">Выполнено</button>
-                <span class="text-sm text-muted" style="margin-left:12px;margin-right:4px;">Хештег:</span>
-                <div class="hashtag-search-wrapper">
-                    <input type="text" class="form-input" id="hashtagFilter" placeholder="Поиск по хештегу..." style="width:180px;padding:4px 28px 4px 8px;font-size:0.8rem;" autocomplete="off">
-                    <button class="hashtag-arrow" id="hashtagArrow" aria-label="Показать все хештеги">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg>
-                    </button>
-                    <div class="hashtag-dropdown" id="hashtagDropdown"></div>
-                </div>
-            </div>
+            <div class="filter-bar" id="statusFilters" style="flex-wrap:wrap;"></div>
             <div id="kanbanView"></div>
             <div id="tableView" class="hidden"></div>
             </div></div></div>
@@ -64,104 +52,6 @@
             if (Array.isArray(h)) allHashtags = h;
         } catch (err) {}
 
-        const hashtagInput = document.getElementById('hashtagFilter');
-        const hashtagDropdown = document.getElementById('hashtagDropdown');
-        const hashtagArrow = document.getElementById('hashtagArrow');
-
-        function showAllHashtags() {
-            if (allHashtags.length > 0) {
-                hashtagDropdown.innerHTML = allHashtags.map(h =>
-                    `<div class="hashtag-dropdown-item${currentHashtag === h ? ' active' : ''}" data-tag="${h}">${h}</div>`
-                ).join('');
-                hashtagDropdown.classList.add('show');
-                hashtagArrow.classList.add('open');
-            }
-        }
-
-        function hideHashtags() {
-            hashtagDropdown.classList.remove('show');
-            hashtagArrow.classList.remove('open');
-        }
-
-        // Arrow click — toggle full list
-        hashtagArrow.addEventListener('click', function(e) {
-            e.stopPropagation();
-            if (hashtagDropdown.classList.contains('show')) {
-                hideHashtags();
-            } else {
-                showAllHashtags();
-            }
-        });
-
-        hashtagInput.addEventListener('focus', function() {
-            if (this.value.trim()) {
-                // Show filtered list if there's text
-                const val = this.value.trim().toLowerCase();
-                const matches = allHashtags.filter(h => h.toLowerCase().includes(val));
-                if (matches.length > 0) {
-                    hashtagDropdown.innerHTML = matches.map(h =>
-                        `<div class="hashtag-dropdown-item" data-tag="${h}">${h}</div>`
-                    ).join('');
-                    hashtagDropdown.classList.add('show');
-                    hashtagArrow.classList.add('open');
-                }
-            }
-        });
-
-        hashtagInput.addEventListener('input', function() {
-            const val = this.value.trim().toLowerCase();
-            if (!val) {
-                hideHashtags();
-                currentHashtag = '';
-                renderProjects();
-                return;
-            }
-            const matches = allHashtags.filter(h => h.toLowerCase().includes(val));
-            if (matches.length > 0) {
-                hashtagDropdown.innerHTML = matches.map(h =>
-                    `<div class="hashtag-dropdown-item" data-tag="${h}">${h}</div>`
-                ).join('');
-                hashtagDropdown.classList.add('show');
-                hashtagArrow.classList.add('open');
-            } else {
-                hideHashtags();
-            }
-        });
-
-        hashtagInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                const val = this.value.trim();
-                if (val) {
-                    currentHashtag = val.startsWith('#') ? val : '#' + val;
-                    this.value = currentHashtag;
-                    hideHashtags();
-                    renderProjects();
-                }
-            }
-            if (e.key === 'Escape') {
-                this.value = '';
-                currentHashtag = '';
-                hideHashtags();
-                renderProjects();
-            }
-        });
-
-        hashtagDropdown.addEventListener('click', function(e) {
-            const item = e.target.closest('.hashtag-dropdown-item');
-            if (item) {
-                currentHashtag = item.dataset.tag;
-                hashtagInput.value = currentHashtag;
-                hideHashtags();
-                renderProjects();
-            }
-        });
-
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.hashtag-search-wrapper')) {
-                hideHashtags();
-            }
-        });
-        
         let currentFilter = 'all';
         let currentHashtag = '';
         let kanbanColumns = [];
@@ -182,6 +72,97 @@
             }
         }
         await loadColumns();
+
+        // Render dynamic status filters from kanban columns
+        function renderStatusFilters() {
+            const container = document.getElementById('statusFilters');
+            let html = '<span class="text-sm text-muted" style="margin-right:4px;">Статус:</span>';
+            html += `<button class="filter-chip${currentFilter === 'all' ? ' active' : ''}" onclick="filterProjects('all', this)">Все</button>`;
+            kanbanColumns.forEach(col => {
+                html += `<button class="filter-chip${currentFilter === col.name ? ' active' : ''}" onclick="filterProjects('${col.name}', this)">${col.name}</button>`;
+            });
+            html += '<span class="text-sm text-muted" style="margin-left:12px;margin-right:4px;">Хештег:</span>';
+            html += `<div class="hashtag-search-wrapper"><input type="text" class="form-input" id="hashtagFilter" placeholder="Поиск по хештегу..." style="width:180px;padding:4px 28px 4px 8px;font-size:0.8rem;" autocomplete="off"><button class="hashtag-arrow" id="hashtagArrow" aria-label="Показать все хештеги"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button><div class="hashtag-dropdown" id="hashtagDropdown"></div></div>`;
+            container.innerHTML = html;
+            initHashtagSearch();
+        }
+
+        // Hashtag search initialization (called after renderStatusFilters)
+        function initHashtagSearch() {
+            const hashtagInput = document.getElementById('hashtagFilter');
+            const hashtagDropdown = document.getElementById('hashtagDropdown');
+            const hashtagArrow = document.getElementById('hashtagArrow');
+            if (!hashtagInput || !hashtagDropdown || !hashtagArrow) return;
+
+            function showAllHashtags() {
+                if (allHashtags.length > 0) {
+                    hashtagDropdown.innerHTML = allHashtags.map(h =>
+                        `<div class="hashtag-dropdown-item${currentHashtag === h ? ' active' : ''}" data-tag="${h}">${h}</div>`
+                    ).join('');
+                    hashtagDropdown.classList.add('show');
+                    hashtagArrow.classList.add('open');
+                }
+            }
+
+            function hideHashtags() {
+                hashtagDropdown.classList.remove('show');
+                hashtagArrow.classList.remove('open');
+            }
+
+            hashtagArrow.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (hashtagDropdown.classList.contains('show')) hideHashtags();
+                else showAllHashtags();
+            });
+
+            hashtagInput.addEventListener('focus', function() {
+                if (this.value.trim()) {
+                    const val = this.value.trim().toLowerCase();
+                    const matches = allHashtags.filter(h => h.toLowerCase().includes(val));
+                    if (matches.length > 0) {
+                        hashtagDropdown.innerHTML = matches.map(h => `<div class="hashtag-dropdown-item" data-tag="${h}">${h}</div>`).join('');
+                        hashtagDropdown.classList.add('show');
+                        hashtagArrow.classList.add('open');
+                    }
+                }
+            });
+
+            hashtagInput.addEventListener('input', function() {
+                const val = this.value.trim().toLowerCase();
+                if (!val) { hideHashtags(); currentHashtag = ''; renderProjects(); return; }
+                const matches = allHashtags.filter(h => h.toLowerCase().includes(val));
+                if (matches.length > 0) {
+                    hashtagDropdown.innerHTML = matches.map(h => `<div class="hashtag-dropdown-item" data-tag="${h}">${h}</div>`).join('');
+                    hashtagDropdown.classList.add('show');
+                    hashtagArrow.classList.add('open');
+                } else { hideHashtags(); }
+            });
+
+            hashtagInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const val = this.value.trim();
+                    if (val) { currentHashtag = val.startsWith('#') ? val : '#' + val; this.value = currentHashtag; hideHashtags(); renderProjects(); }
+                }
+                if (e.key === 'Escape') { this.value = ''; currentHashtag = ''; hideHashtags(); renderProjects(); }
+            });
+
+            hashtagDropdown.addEventListener('click', function(e) {
+                const item = e.target.closest('.hashtag-dropdown-item');
+                if (item) { currentHashtag = item.dataset.tag; hashtagInput.value = currentHashtag; hideHashtags(); renderProjects(); }
+            });
+        }
+
+        // Close hashtag dropdown on outside click
+        document.addEventListener('click', function(e) {
+            const dropdown = document.getElementById('hashtagDropdown');
+            if (dropdown && !e.target.closest('.hashtag-search-wrapper')) {
+                dropdown.classList.remove('show');
+                const arrow = document.getElementById('hashtagArrow');
+                if (arrow) arrow.classList.remove('open');
+            }
+        });
+
+        renderStatusFilters();
         
         window.switchView = function(view) {
             const kanban = document.getElementById('kanbanView');
@@ -569,6 +550,7 @@
                     await API.put(`/api/kanban-columns/${u.id}`, { sort_order: u.sort_order });
                 }
                 await loadColumns();
+                renderStatusFilters();
                 renderProjects();
             } catch (err) {
                 showToast('Ошибка сохранения порядка', 'error');
@@ -584,6 +566,7 @@
                 showToast('Колонка добавлена', 'success');
                 await loadColumns();
                 await CRM.load();
+                renderStatusFilters();
                 renderProjects();
                 showColumnConfigModal();
             } catch (err) {
@@ -595,6 +578,7 @@
             try {
                 await API.put(`/api/kanban-columns/${id}`, { color });
                 await loadColumns();
+                renderStatusFilters();
                 renderProjects();
             } catch (err) {
                 showToast('Ошибка', 'error');
@@ -609,6 +593,7 @@
                 showToast('Колонка удалена', 'success');
                 await loadColumns();
                 await CRM.load();
+                renderStatusFilters();
                 renderProjects();
                 showColumnConfigModal();
             } catch (err) {
