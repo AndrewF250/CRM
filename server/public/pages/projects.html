@@ -371,7 +371,10 @@
 
             function renderColList() {
                 return kanbanColumns.map(c => `
-                    <div class="col-config-item" data-col-id="${c.id}">
+                    <div class="col-config-item" data-col-id="${c.id}" draggable="true">
+                        <div class="col-config-handle" title="Перетащить для изменения порядка">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+                        </div>
                         <div class="col-config-dot" style="background:${colorDotsCSS[c.color] || 'var(--gray-400)'}"></div>
                         <div class="col-config-name">${c.name}</div>
                         <select class="form-select" style="width:auto;padding:2px 6px;font-size:0.75rem;" onchange="updateColumnColor(${c.id}, this.value)">
@@ -386,6 +389,7 @@
                 <div class="modal" onclick="event.stopPropagation()">
                     <div class="modal-header"><h3 class="modal-title">Настройка колонок</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
+                        <div style="font-size:0.8rem;color:var(--gray-500);margin-bottom:12px;">Перетащите колонки для изменения порядка</div>
                         <div id="colConfigList">${renderColList()}</div>
                         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200);">
                             <div style="font-weight:600;font-size:0.85rem;margin-bottom:8px;">Добавить колонку</div>
@@ -402,7 +406,74 @@
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
+
+            // Init drag-and-drop for reordering
+            initColumnDragDrop();
         };
+
+        function initColumnDragDrop() {
+            const list = document.getElementById('colConfigList');
+            if (!list) return;
+            let draggedEl = null;
+
+            list.querySelectorAll('.col-config-item').forEach(item => {
+                item.addEventListener('dragstart', (e) => {
+                    draggedEl = item;
+                    item.classList.add('col-dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', item.dataset.colId);
+                });
+                item.addEventListener('dragend', () => {
+                    item.classList.remove('col-dragging');
+                    document.querySelectorAll('.col-drag-over').forEach(el => el.classList.remove('col-drag-over'));
+                    draggedEl = null;
+                });
+                item.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    if (draggedEl && draggedEl !== item) {
+                        item.classList.add('col-drag-over');
+                    }
+                });
+                item.addEventListener('dragleave', () => {
+                    item.classList.remove('col-drag-over');
+                });
+                item.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    item.classList.remove('col-drag-over');
+                    if (!draggedEl || draggedEl === item) return;
+
+                    // Determine position
+                    const rect = item.getBoundingClientRect();
+                    const midY = rect.top + rect.height / 2;
+                    if (e.clientY < midY) {
+                        list.insertBefore(draggedEl, item);
+                    } else {
+                        list.insertBefore(draggedEl, item.nextSibling);
+                    }
+
+                    // Save new order
+                    await saveColumnOrder();
+                });
+            });
+        }
+
+        async function saveColumnOrder() {
+            const items = document.querySelectorAll('#colConfigList .col-config-item');
+            const updates = [];
+            items.forEach((item, index) => {
+                updates.push({ id: parseInt(item.dataset.colId), sort_order: index });
+            });
+
+            try {
+                for (const u of updates) {
+                    await API.put(`/api/kanban-columns/${u.id}`, { sort_order: u.sort_order });
+                }
+                await loadColumns();
+                renderProjects();
+            } catch (err) {
+                showToast('Ошибка сохранения порядка', 'error');
+            }
+        }
 
         window.addColumn = async function() {
             const name = document.getElementById('newColName').value.trim();
