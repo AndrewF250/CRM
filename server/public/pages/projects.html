@@ -453,9 +453,23 @@
         window.showColumnConfigModal = async function() {
             await loadColumns();
             const overlay = document.getElementById('modalOverlay');
-            const colors = ['blue', 'yellow', 'green', 'gray', 'red', 'purple'];
-            const colorLabels = { blue: 'Синий', yellow: 'Жёлтый', green: 'Зелёный', gray: 'Серый', red: 'Красный', purple: 'Фиолетовый' };
-            const colorDotsCSS = { blue: 'var(--info)', yellow: 'var(--warning)', green: 'var(--success)', gray: 'var(--gray-400)', red: 'var(--danger)', purple: 'var(--primary)' };
+            const presetColors = [
+                { name: 'blue', hex: '#3B82F6' }, { name: 'yellow', hex: '#F59E0B' },
+                { name: 'green', hex: '#10B981' }, { name: 'gray', hex: '#9CA3AF' },
+                { name: 'red', hex: '#EF4444' }, { name: 'purple', hex: '#8B5CF6' },
+                { name: 'pink', hex: '#EC4899' }, { name: 'orange', hex: '#F97316' },
+                { name: 'teal', hex: '#14B8A6' }, { name: 'indigo', hex: '#6366F1' },
+                { name: 'lime', hex: '#84CC16' }, { name: 'cyan', hex: '#06B6D4' }
+            ];
+            const colorHexMap = {};
+            presetColors.forEach(c => colorHexMap[c.name] = c.hex);
+
+            function getColHex(color) {
+                return colorHexMap[color] || color;
+            }
+            function isCustomColor(color) {
+                return !colorHexMap[color];
+            }
 
             function renderColList() {
                 return kanbanColumns.map(c => `
@@ -463,11 +477,22 @@
                         <div class="col-config-handle" title="Перетащить для изменения порядка">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                         </div>
-                        <div class="col-config-dot" style="background:${colorDotsCSS[c.color] || 'var(--gray-400)'}"></div>
-                        <div class="col-config-name">${c.name}</div>
-                        <select class="form-select" style="width:auto;padding:2px 6px;font-size:0.75rem;" onchange="updateColumnColor(${c.id}, this.value)">
-                            ${colors.map(cl => `<option value="${cl}" ${c.color === cl ? 'selected' : ''}>${colorLabels[cl]}</option>`).join('')}
-                        </select>
+                        <div class="col-config-dot" style="background:${getColHex(c.color)}"></div>
+                        <div class="col-config-name" ondblclick="startRenameColumn(this, ${c.id})" title="Дважды кликните для переименования">${c.name}</div>
+                        <div class="color-palette-wrapper">
+                            <button class="color-palette-btn" onclick="toggleColorPalette(this, ${c.id})" title="Изменить цвет" style="background:${getColHex(c.color)};">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.4-.13-.76-.38-1.04-.25-.28-.37-.6-.37-.96 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-5.5-4.5-9.5-10-9.5z"/></svg>
+                            </button>
+                            <div class="color-palette-dropdown" id="palette-${c.id}">
+                                <div class="color-palette-grid">
+                                    ${presetColors.map(cl => `<div class="color-swatch${c.color === cl.name ? ' active' : ''}" style="background:${cl.hex};" data-color="${cl.name}" data-col-id="${c.id}" title="${cl.name}"></div>`).join('')}
+                                </div>
+                                <div class="color-custom-row">
+                                    <input type="color" class="color-custom-input" value="${getColHex(c.color)}" data-col-id="${c.id}" onchange="updateColumnColor(${c.id}, this.value)">
+                                    <span style="font-size:0.75rem;color:var(--gray-500);">Свой цвет</span>
+                                </div>
+                            </div>
+                        </div>
                         <button class="btn btn-ghost btn-sm" style="color:var(--danger);padding:2px 6px;" onclick="deleteColumn(${c.id})" aria-label="Удалить">✕</button>
                     </div>
                 `).join('');
@@ -477,15 +502,12 @@
                 <div class="modal" onclick="event.stopPropagation()">
                     <div class="modal-header"><h3 class="modal-title">Настройка колонок</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div style="font-size:0.8rem;color:var(--gray-500);margin-bottom:12px;">Перетащите колонки для изменения порядка</div>
+                        <div style="font-size:0.8rem;color:var(--gray-500);margin-bottom:12px;">Перетащите для порядка · Двойной клик по названию для переименования</div>
                         <div id="colConfigList">${renderColList()}</div>
                         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200);">
                             <div style="font-weight:600;font-size:0.85rem;margin-bottom:8px;">Добавить колонку</div>
                             <div style="display:flex;gap:8px;">
                                 <input type="text" class="form-input" id="newColName" placeholder="Название" style="flex:1;">
-                                <select class="form-select" id="newColColor" style="width:auto;">
-                                    ${colors.map(cl => `<option value="${cl}">${colorLabels[cl]}</option>`).join('')}
-                                </select>
                                 <button class="btn btn-primary btn-sm" onclick="addColumn()">Добавить</button>
                             </div>
                         </div>
@@ -494,9 +516,77 @@
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
-
-            // Init drag-and-drop for reordering
             initColumnDragDrop();
+
+            // Close palettes on outside click
+            document.addEventListener('click', closeAllPalettes);
+        };
+
+        function closeAllPalettes(e) {
+            document.querySelectorAll('.color-palette-dropdown.show').forEach(d => {
+                if (!d.parentElement.contains(e.target)) d.classList.remove('show');
+            });
+        }
+
+        window.toggleColorPalette = function(btn, colId) {
+            const dropdown = document.getElementById('palette-' + colId);
+            if (!dropdown) return;
+            const isOpen = dropdown.classList.contains('show');
+            document.querySelectorAll('.color-palette-dropdown.show').forEach(d => d.classList.remove('show'));
+            if (!isOpen) dropdown.classList.add('show');
+        };
+
+        document.addEventListener('click', function(e) {
+            document.querySelectorAll('.color-palette-dropdown.show').forEach(d => {
+                if (!d.parentElement.contains(e.target)) d.classList.remove('show');
+            });
+        });
+
+        // Color swatch click
+        document.addEventListener('click', function(e) {
+            const swatch = e.target.closest('.color-swatch');
+            if (swatch) {
+                const colId = parseInt(swatch.dataset.colId);
+                const color = swatch.dataset.color;
+                updateColumnColor(colId, color);
+                // Update active state
+                swatch.parentElement.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+                swatch.classList.add('active');
+                // Close palette
+                setTimeout(() => {
+                    swatch.closest('.color-palette-dropdown').classList.remove('show');
+                }, 200);
+            }
+        });
+
+        window.startRenameColumn = function(el, colId) {
+            const currentName = el.textContent.trim();
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentName;
+            input.className = 'col-config-name-edit';
+            el.replaceWith(input);
+            input.focus();
+            input.select();
+
+            async function save() {
+                const newName = input.value.trim() || currentName;
+                try {
+                    await API.put(`/api/kanban-columns/${colId}`, { name: newName });
+                    await loadColumns();
+                    renderStatusFilters();
+                    renderProjects();
+                    showColumnConfigModal();
+                } catch (err) {
+                    showToast(err.message || 'Ошибка', 'error');
+                }
+            }
+
+            input.addEventListener('blur', save);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                if (e.key === 'Escape') { input.value = currentName; input.blur(); }
+            });
         };
 
         function initColumnDragDrop() {
@@ -566,10 +656,9 @@
 
         window.addColumn = async function() {
             const name = document.getElementById('newColName').value.trim();
-            const color = document.getElementById('newColColor').value;
             if (!name) { showToast('Введите название', 'error'); return; }
             try {
-                await API.post('/api/kanban-columns', { name, color });
+                await API.post('/api/kanban-columns', { name, color: 'blue' });
                 showToast('Колонка добавлена', 'success');
                 await loadColumns();
                 await CRM.load();
