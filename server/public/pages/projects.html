@@ -54,6 +54,7 @@
 
         let currentFilter = 'all';
         let currentHashtag = '';
+        let currentView = 'kanban';
         let kanbanColumns = [];
 
         // Load kanban columns from API
@@ -73,14 +74,18 @@
         }
         await loadColumns();
 
-        // Render dynamic status filters from kanban columns
+        // Render dynamic status filters from kanban columns (only for table view)
         function renderStatusFilters() {
             const container = document.getElementById('statusFilters');
-            let html = '<span class="text-sm text-muted" style="margin-right:4px;">Статус:</span>';
-            html += `<button class="filter-chip${currentFilter === 'all' ? ' active' : ''}" onclick="filterProjects('all', this)">Все</button>`;
-            kanbanColumns.forEach(col => {
-                html += `<button class="filter-chip${currentFilter === col.name ? ' active' : ''}" onclick="filterProjects('${col.name}', this)">${col.name}</button>`;
-            });
+            let html = '';
+            // Show status filters only in table view
+            if (currentView === 'table') {
+                html += '<span class="text-sm text-muted" style="margin-right:4px;">Статус:</span>';
+                html += `<button class="filter-chip${currentFilter === 'all' ? ' active' : ''}" onclick="filterProjects('all', this)">Все</button>`;
+                kanbanColumns.forEach(col => {
+                    html += `<button class="filter-chip${currentFilter === col.name ? ' active' : ''}" onclick="filterProjects('${col.name}', this)">${col.name}</button>`;
+                });
+            }
             html += '<span class="text-sm text-muted" style="margin-left:12px;margin-right:4px;">Хештег:</span>';
             html += `<div class="hashtag-search-wrapper"><input type="text" class="form-input" id="hashtagFilter" placeholder="Поиск по хештегу..." style="width:180px;padding:4px 28px 4px 8px;font-size:0.8rem;" autocomplete="off"><button class="hashtag-arrow" id="hashtagArrow" aria-label="Показать все хештеги"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button><div class="hashtag-dropdown" id="hashtagDropdown"></div></div>`;
             container.innerHTML = html;
@@ -165,6 +170,7 @@
         renderStatusFilters();
         
         window.switchView = function(view) {
+            currentView = view;
             const kanban = document.getElementById('kanbanView');
             const table = document.getElementById('tableView');
             const btnKanban = document.getElementById('viewKanban');
@@ -189,6 +195,7 @@
                 btnKanban.style.color = '';
                 btnKanban.style.borderColor = '';
             }
+            renderStatusFilters();
         };
         
         window.filterProjects = function(status, btn) {
