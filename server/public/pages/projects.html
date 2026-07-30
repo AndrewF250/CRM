@@ -517,16 +517,7 @@
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
             initColumnDragDrop();
-
-            // Close palettes on outside click
-            document.addEventListener('click', closeAllPalettes);
         };
-
-        function closeAllPalettes(e) {
-            document.querySelectorAll('.color-palette-dropdown.show').forEach(d => {
-                if (!d.parentElement.contains(e.target)) d.classList.remove('show');
-            });
-        }
 
         window.toggleColorPalette = function(btn, colId) {
             const dropdown = document.getElementById('palette-' + colId);
@@ -536,26 +527,25 @@
             if (!isOpen) dropdown.classList.add('show');
         };
 
+        // Unified click handler for palettes and swatches
         document.addEventListener('click', function(e) {
-            document.querySelectorAll('.color-palette-dropdown.show').forEach(d => {
-                if (!d.parentElement.contains(e.target)) d.classList.remove('show');
-            });
-        });
-
-        // Color swatch click
-        document.addEventListener('click', function(e) {
+            // Swatch click
             const swatch = e.target.closest('.color-swatch');
             if (swatch) {
+                e.stopPropagation();
                 const colId = parseInt(swatch.dataset.colId);
                 const color = swatch.dataset.color;
-                updateColumnColor(colId, color);
-                // Update active state
+                const isTask = swatch.dataset.type === 'task';
                 swatch.parentElement.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
                 swatch.classList.add('active');
-                // Close palette
-                setTimeout(() => {
-                    swatch.closest('.color-palette-dropdown').classList.remove('show');
-                }, 200);
+                setTimeout(() => { swatch.closest('.color-palette-dropdown').classList.remove('show'); }, 100);
+                if (isTask) updateTaskColumnColor(colId, color);
+                else updateColumnColor(colId, color);
+                return;
+            }
+            // Close palettes on outside click
+            if (!e.target.closest('.color-palette-wrapper')) {
+                document.querySelectorAll('.color-palette-dropdown.show').forEach(d => d.classList.remove('show'));
             }
         });
 

@@ -115,22 +115,21 @@ const projects = [
 ];
 
 const tasks = [
-    { id: 't1', project_id: 'petrov', name: 'Настроить webhook', column_status: 'Готово', person: 'Админ Иван', date: '20.07', time: '09:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#бот']), parent_id: null },
-    { id: 't2', project_id: 'petrov', name: 'Логика ответов', column_status: 'Готово', person: 'Админ Иван', date: '20.07', time: '14:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#бот', '#авито']), parent_id: null },
-    { id: 't3', project_id: 'petrov', name: 'Интеграция с CRM', column_status: 'В работе', person: 'Админ Иван', date: 'Сегодня', time: '10:00', done: 0, urgent: 1, hashtags: JSON.stringify(['#бот', '#авито', '#crm']), parent_id: null },
-    { id: 't4', project_id: 'petrov', name: 'Тестирование', column_status: 'Согласуем', person: 'Менеджер А', date: '24.07', time: '14:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#тест']), parent_id: null },
-    { id: 't5', project_id: 'petrov', name: 'Деплой и передача', column_status: 'Ожидает', person: 'Админ Иван', date: '25.07', time: '12:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#деплой', '#авито']), parent_id: null },
-    // Child tasks of "Интеграция с CRM" (t3)
-    { id: 't3a', project_id: 'petrov', name: 'Настроить API-эндпоинты', column_status: 'В работе', person: 'Админ Иван', date: 'Сегодня', time: '11:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#api']), parent_id: 't3' },
-    { id: 't3b', project_id: 'petrov', name: 'Написать тесты', column_status: 'Ожидает', person: 'Админ Иван', date: 'Завтра', time: '10:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#тест']), parent_id: 't3' },
-    { id: 't6', project_id: 'romashka', name: 'Согласовать макет', column_status: 'В работе', person: 'Менеджер А', date: 'Сегодня', time: '14:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#wordpress', '#дизайн']), parent_id: null },
-    { id: 't7', project_id: 'romashka', name: 'Верстка главной', column_status: 'Ожидает', person: 'Админ Иван', date: '28.07', time: '10:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#wordpress']), parent_id: null },
-    { id: 't8', project_id: 'mayak', name: 'Подбор ключей', column_status: 'Готово', person: 'Админ Иван', date: '18.07', time: '10:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#ключи']), parent_id: null },
-    { id: 't9', project_id: 'mayak', name: 'Запустить рекламу', column_status: 'В работе', person: 'Админ Иван', date: 'Сегодня', time: '16:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#реклама', '#директ']), parent_id: null },
-    { id: 't10', project_id: 'tehno', name: 'Бот-заготовка', column_status: 'Готово', person: 'Админ Иван', date: '15.07', time: '09:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#бот']), parent_id: null },
-    { id: 't11', project_id: 'tehno', name: 'Уведомления', column_status: 'В работе', person: 'Админ Иван', date: 'Завтра', time: '11:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#бот', '#telegram']), parent_id: null },
-    { id: 't12', project_id: 'kuznetsov', name: 'Аудит сайта', column_status: 'В работе', person: 'Админ Иван', date: '18.07', time: '10:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#seo']), parent_id: null },
-    { id: 't13', project_id: 'sidorov', name: 'Отчёт по SEO', column_status: 'В работе', person: 'Админ Иван', date: '28.07', time: '09:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#отчёт', '#seo']), parent_id: null },
+    { id: 't1', project_id: 'petrov', name: 'Настроить webhook', column_status: 'Готово', person: 'Админ Иван', date: '2026-07-20', date_end: '2026-07-20', time: '09:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#бот']), parent_id: null, priority: 'medium' },
+    { id: 't2', project_id: 'petrov', name: 'Логика ответов', column_status: 'Готово', person: 'Админ Иван', date: '2026-07-20', date_end: '2026-07-20', time: '14:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#бот', '#авито']), parent_id: null, priority: 'medium' },
+    { id: 't3', project_id: 'petrov', name: 'Интеграция с CRM', column_status: 'В работе', person: 'Админ Иван', date: '2026-07-28', date_end: '2026-07-30', time: '10:00', done: 0, urgent: 1, hashtags: JSON.stringify(['#бот', '#авито', '#crm']), parent_id: null, priority: 'high' },
+    { id: 't4', project_id: 'petrov', name: 'Тестирование', column_status: 'Согласуем', person: 'Менеджер А', date: '2026-07-29', date_end: '2026-07-29', time: '14:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#тест']), parent_id: null, priority: 'low' },
+    { id: 't5', project_id: 'petrov', name: 'Деплой и передача', column_status: 'Ожидает', person: 'Админ Иван', date: '2026-07-30', date_end: '2026-07-30', time: '12:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#деплой', '#авито']), parent_id: null, priority: 'high' },
+    { id: 't3a', project_id: 'petrov', name: 'Настроить API-эндпоинты', column_status: 'В работе', person: 'Админ Иван', date: '2026-07-28', date_end: '2026-07-28', time: '11:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#api']), parent_id: 't3', priority: 'medium' },
+    { id: 't3b', project_id: 'petrov', name: 'Написать тесты', column_status: 'Ожидает', person: 'Админ Иван', date: '2026-07-29', date_end: '2026-07-29', time: '10:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#тест']), parent_id: 't3', priority: 'low' },
+    { id: 't6', project_id: 'romashka', name: 'Согласовать макет', column_status: 'В работе', person: 'Менеджер А', date: '2026-07-28', date_end: '2026-07-28', time: '14:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#wordpress', '#дизайн']), parent_id: null, priority: 'medium' },
+    { id: 't7', project_id: 'romashka', name: 'Верстка главной', column_status: 'Ожидает', person: 'Админ Иван', date: '2026-07-30', date_end: '2026-08-01', time: '10:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#wordpress']), parent_id: null, priority: 'medium' },
+    { id: 't8', project_id: 'mayak', name: 'Подбор ключей', column_status: 'Готово', person: 'Админ Иван', date: '2026-07-18', date_end: '2026-07-18', time: '10:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#ключи']), parent_id: null, priority: 'low' },
+    { id: 't9', project_id: 'mayak', name: 'Запустить рекламу', column_status: 'В работе', person: 'Админ Иван', date: '2026-07-28', date_end: '2026-07-29', time: '16:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#реклама', '#директ']), parent_id: null, priority: 'high' },
+    { id: 't10', project_id: 'tehno', name: 'Бот-заготовка', column_status: 'Готово', person: 'Админ Иван', date: '2026-07-15', date_end: '2026-07-15', time: '09:00', done: 1, urgent: 0, hashtags: JSON.stringify(['#бот']), parent_id: null, priority: 'medium' },
+    { id: 't11', project_id: 'tehno', name: 'Уведомления', column_status: 'В работе', person: 'Админ Иван', date: '2026-07-29', date_end: '2026-07-29', time: '11:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#бот', '#telegram']), parent_id: null, priority: 'medium' },
+    { id: 't12', project_id: 'kuznetsov', name: 'Аудит сайта', column_status: 'В работе', person: 'Админ Иван', date: '2026-07-28', date_end: '2026-07-30', time: '10:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#seo']), parent_id: null, priority: 'high' },
+    { id: 't13', project_id: 'sidorov', name: 'Отчёт по SEO', column_status: 'В работе', person: 'Админ Иван', date: '2026-07-28', date_end: '2026-07-28', time: '09:00', done: 0, urgent: 0, hashtags: JSON.stringify(['#отчёт', '#seo']), parent_id: null, priority: 'medium' },
 ];
 
 const kanbanColumns = [
@@ -155,8 +154,8 @@ const insertProject = db.prepare(`
 `);
 
 const insertTask = db.prepare(`
-    INSERT OR REPLACE INTO tasks (id, project_id, name, column_status, person, date, time, done, urgent, hashtags, parent_id)
-    VALUES (@id, @project_id, @name, @column_status, @person, @date, @time, @done, @urgent, @hashtags, @parent_id)
+    INSERT OR REPLACE INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority)
+    VALUES (@id, @project_id, @name, @column_status, @person, @date, @date_end, @time, @done, @urgent, @hashtags, @parent_id, @priority)
 `);
 
 const insertColumn = db.prepare(`

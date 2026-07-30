@@ -261,7 +261,7 @@ app.get('/api/tasks', requireAuth, (req, res) => {
 
 app.post('/api/tasks', requireAuth, (req, res) => {
   try {
-    const { id, project_id, name, column_status, person, date, time, done, urgent, hashtags, parent_id } = req.body;
+    const { id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority } = req.body;
     const taskId = id || 'task_' + Date.now();
     
     // Validate parent_id
@@ -272,14 +272,14 @@ app.post('/api/tasks', requireAuth, (req, res) => {
       if (parent.project_id !== project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
     }
     
-    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, time, done, urgent, hashtags, parent_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      taskId, project_id, name, column_status || 'Ожидает', person || 'Костя',
-      date, time, done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null
+    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      taskId, project_id || '', name, column_status || 'Ожидает', person || 'Костя',
+      date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium'
     );
     
-    updateProjectProgress(project_id);
-    logActivity(project_id, taskId, req.user.name, 'create_task', `Создана задача: ${name}`);
+    if (project_id) updateProjectProgress(project_id);
+    logActivity(project_id || '', taskId, req.user.name, 'create_task', `Создана задача: ${name}`);
     
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
     res.status(201).json({ ...task, done: !!task.done, urgent: !!task.urgent, hashtags: JSON.parse(task.hashtags || '[]') });
@@ -290,7 +290,7 @@ app.post('/api/tasks', requireAuth, (req, res) => {
 
 app.put('/api/tasks/:id', requireAuth, (req, res) => {
   try {
-    const { name, column_status, person, date, time, done, urgent, hashtags, parent_id } = req.body;
+    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority } = req.body;
     
     const old = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Задача не найдена' });
@@ -299,7 +299,6 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
     const newParentId = parent_id !== undefined ? (parent_id || null) : old.parent_id;
     if (newParentId) {
       if (newParentId === req.params.id) return res.status(400).json({ error: 'Задача не может быть подзадачей самой себя' });
-      // Check for cycle: walk up the parent chain
       let checkId = newParentId;
       while (checkId) {
         if (checkId === req.params.id) return res.status(400).json({ error: 'Нельзя создать цикл вложенности' });
@@ -310,15 +309,15 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
       if (parent && parent.project_id !== old.project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
     }
     
-    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, updated_at=CURRENT_TIMESTAMP
+    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?`).run(
-      name, column_status, person, date, time, done ? 1 : 0, urgent ? 1 : 0,
-      JSON.stringify(hashtags || []), newParentId, req.params.id
+      name, column_status, person, date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0,
+      JSON.stringify(hashtags || []), newParentId, priority || 'medium', req.params.id
     );
     
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (task) {
-      updateProjectProgress(task.project_id);
+      if (task.project_id) updateProjectProgress(task.project_id);
       if (old && old.done !== (done ? 1 : 0)) {
         logActivity(task.project_id, req.params.id, req.user.name, done ? 'complete_task' : 'uncomplete_task', name);
       }

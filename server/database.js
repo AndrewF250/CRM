@@ -151,6 +151,20 @@ try {
   db.exec("ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT NULL REFERENCES tasks(id) ON DELETE CASCADE");
 }
 
+// Migration: add date_end to tasks (date range)
+try {
+  db.prepare("SELECT date_end FROM tasks LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE tasks ADD COLUMN date_end TEXT DEFAULT ''");
+}
+
+// Migration: add priority to tasks (low/medium/high)
+try {
+  db.prepare("SELECT priority FROM tasks LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'");
+}
+
 // Create kanban_columns table for configurable project columns
 db.exec(`
   CREATE TABLE IF NOT EXISTS kanban_columns (

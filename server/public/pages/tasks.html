@@ -200,36 +200,50 @@
             const task = CRM.getTasks().find(t => t.id === taskId);
             if (!task) return;
             const overlay = document.getElementById('modalOverlay');
-            let projectOptions = '';
-            CRM.getProjects().forEach(p => {
-                projectOptions += `<option value="${p.id}" ${task.project_id === p.id ? 'selected' : ''}>${p.client} — ${p.name}</option>`;
-            });
+            const project = CRM.getProject(task.project_id);
+            const projectLabel = project ? project.client + ' — ' + project.name : '';
             let statusOptions = '';
             taskColumns.forEach(col => {
                 statusOptions += `<option value="${col.name}" ${task.column_status === col.name ? 'selected' : ''}>${col.name}</option>`;
             });
+            const priorityOptions = `
+                <option value="low" ${task.priority === 'low' ? 'selected' : ''}>🟢 Низкий</option>
+                <option value="medium" ${task.priority === 'medium' || !task.priority ? 'selected' : ''}>🟡 Средний</option>
+                <option value="high" ${task.priority === 'high' ? 'selected' : ''}>🔴 Высокий</option>
+            `;
 
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
                     <div class="modal-header"><h3 class="modal-title">Редактировать задачу</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group">
+                            <label class="form-label">Проект</label>
+                            <div class="hashtag-search-wrapper" style="width:100%;">
+                                <input type="text" class="form-input" id="editTaskProject" value="${projectLabel}" data-selected-id="${task.project_id || ''}" placeholder="Поиск проекта..." autocomplete="off" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">
+                                <button class="hashtag-arrow" onclick="event.stopPropagation();toggleProjectDropdown('editTaskProjectDropdown')" aria-label="Показать все проекты"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button>
+                                <div class="hashtag-dropdown" id="editTaskProjectDropdown"></div>
+                            </div>
+                        </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="editTaskProject">Проект</label><select class="form-select" id="editTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
-                            <div class="form-group"><label class="form-label" for="editTaskPerson">Ответственный</label><select class="form-select" id="editTaskPerson" onclick="event.stopPropagation()"><option ${task.person === 'Костя' ? 'selected' : ''}>Костя</option><option ${task.person === 'Максим' ? 'selected' : ''}>Максим</option><option ${task.person === 'Андрей' ? 'selected' : ''}>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editTaskPerson">Исполнитель</label><select class="form-select" id="editTaskPerson" onclick="event.stopPropagation()"><option ${task.person === 'Костя' ? 'selected' : ''}>Костя</option><option ${task.person === 'Максим' ? 'selected' : ''}>Максим</option><option ${task.person === 'Андрей' ? 'selected' : ''}>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editTaskPriority">Приоритет</label><select class="form-select" id="editTaskPriority" onclick="event.stopPropagation()">${priorityOptions}</select></div>
                         </div>
                         <div class="form-row">
                             <div class="form-group"><label class="form-label" for="editTaskStatus">Статус</label><select class="form-select" id="editTaskStatus" onclick="event.stopPropagation()">${statusOptions}</select></div>
-                            <div class="form-group"><label class="form-label" for="editTaskDate">Дата</label><input type="date" class="form-input" id="editTaskDate" value="${task.date && task.date !== '—' ? task.date : ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="editTaskDate">Дата начала</label><input type="date" class="form-input" id="editTaskDate" value="${task.date || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="editTaskDateEnd" value="${task.date_end || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                             <div class="form-group"><label class="form-label" for="editTaskTime">Время</label><input type="time" class="form-input" id="editTaskTime" value="${task.time || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
-                        <div class="form-group"><label class="form-check"><input type="checkbox" id="editTaskUrgent" ${task.urgent ? 'checked' : ''} onclick="event.stopPropagation()"> Срочно</label></div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="saveTaskEdit('${taskId}')">Сохранить</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
+            initProjectSearch('editTaskProject', 'editTaskProjectDropdown');
         };
 
         window.saveTaskEdit = async function(taskId) {
@@ -240,16 +254,25 @@
                 const name = document.getElementById('editTaskName').value.trim();
                 const column_status = document.getElementById('editTaskStatus').value;
                 const done = column_status === 'Готово';
+                const projectInput = document.getElementById('editTaskProject');
+                const projectId = projectInput.dataset.selectedId || '';
+
+                if (!projectId) {
+                    const confirmed = await showConfirmDialog('Поле «Проект» не заполнено. Сохранить?');
+                    if (!confirmed) return;
+                }
 
                 await CRM.updateTask(taskId, {
                     name: name,
-                    project_id: document.getElementById('editTaskProject').value,
+                    project_id: projectId,
                     person: document.getElementById('editTaskPerson').value,
                     column_status: column_status,
-                    date: document.getElementById('editTaskDate').value || '—',
+                    date: document.getElementById('editTaskDate').value || '',
+                    date_end: document.getElementById('editTaskDateEnd').value || '',
                     time: document.getElementById('editTaskTime').value || '',
                     done: done,
-                    urgent: document.getElementById('editTaskUrgent').checked
+                    urgent: false,
+                    priority: document.getElementById('editTaskPriority').value
                 });
 
                 closeModal();
@@ -305,18 +328,18 @@
             const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
 
             if (currentTimeFilter === 'today') {
-                tasks = tasks.filter(t => t.date && new Date(t.date).toDateString() === today.toDateString());
+                tasks = tasks.filter(t => t.date === today.toISOString().split('T')[0]);
             } else if (currentTimeFilter === 'tomorrow') {
-                tasks = tasks.filter(t => t.date && new Date(t.date).toDateString() === tomorrow.toDateString());
+                tasks = tasks.filter(t => t.date === tomorrow.toISOString().split('T')[0]);
             } else if (currentTimeFilter === 'week') {
                 tasks = tasks.filter(t => {
-                    if (!t.date || t.date === '—') return false;
+                    if (!t.date) return false;
                     const d = new Date(t.date);
                     return d >= today && d <= weekEnd;
                 });
             } else if (currentTimeFilter === 'overdue') {
                 tasks = tasks.filter(t => {
-                    if (!t.date || t.date === '—' || t.done) return false;
+                    if (!t.date || t.done) return false;
                     return new Date(t.date) < today;
                 });
             }
@@ -365,6 +388,12 @@
                 }
                 actionBtns += `<button class="task-action-btn gear" onclick="showEditTaskModal('${t.id}')" title="Настройки" aria-label="Настройки"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg></button>`;
 
+                const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
+                const priorityLabel = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
+                const dateRange = t.date && t.date_end && t.date !== t.date_end
+                    ? t.date + ' — ' + t.date_end
+                    : t.date || '';
+
                 let html = `<div class="task-card${isDone ? ' done' : ''}${isChild ? ' child' : ''}${isPaused ? ' paused' : ''}" data-task-id="${t.id}" draggable="true">
                     <div style="display:flex;align-items:flex-start;gap:12px;">
                         <div style="flex:1;">
@@ -372,12 +401,11 @@
                                 <div>
                                     <div class="task-name" style="font-weight:600;font-size:0.95rem;${isDone ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
                                     <div style="display:flex;align-items:center;gap:8px;margin-top:4px;font-size:0.8rem;color:var(--gray-500);">
-                                        <a href="/pages/project.html?id=${t.project_id}" style="color:var(--primary);text-decoration:none;">${project ? project.name : ''}</a>
-                                        <span>·</span>
+                                        ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" style="color:var(--primary);text-decoration:none;">' + project.name + '</a><span>·</span>' : ''}
                                         <span>${t.person}</span>
                                         <span>·</span>
-                                        <span>${t.date || ''} ${t.time || ''}</span>
-                                        ${t.urgent ? '<span class="badge badge-danger" style="font-size:0.65rem;">СРОЧНО</span>' : ''}
+                                        <span>${dateRange} ${t.time || ''}</span>
+                                        <span title="${priorityLabel[t.priority] || 'Средний'}">${priorityEmoji[t.priority] || '🟡'}</span>
                                         ${isPaused ? '<span class="badge badge-warning" style="font-size:0.65rem;">ПРОСТОЙ</span>' : ''}
                                         ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + ' подзадач</span>' : ''}
                                     </div>
@@ -464,31 +492,44 @@
         
         window.showNewTaskModal = function() {
             const overlay = document.getElementById('modalOverlay');
-            let projectOptions = '';
-            CRM.getProjects().forEach(p => {
-                projectOptions += `<option value="${p.id}">${p.client} — ${p.name}</option>`;
-            });
-            
+            const projects = CRM.getProjects();
+
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
                     <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                        <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newTaskProject">Проект</label><select class="form-select" id="newTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
-                            <div class="form-group"><label class="form-label" for="newTaskPerson">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                        <div class="form-group">
+                            <label class="form-label">Проект</label>
+                            <div class="hashtag-search-wrapper" style="width:100%;">
+                                <input type="text" class="form-input" id="newTaskProject" placeholder="Поиск проекта..." autocomplete="off" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">
+                                <button class="hashtag-arrow" onclick="event.stopPropagation();toggleProjectDropdown('newTaskProjectDropdown')" aria-label="Показать все проекты"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button>
+                                <div class="hashtag-dropdown" id="newTaskProjectDropdown"></div>
+                            </div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPerson">Исполнитель</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group">
+                                <label class="form-label" for="newTaskPriority">Приоритет</label>
+                                <select class="form-select" id="newTaskPriority" onclick="event.stopPropagation()">
+                                    <option value="low">🟢 Низкий</option>
+                                    <option value="medium" selected>🟡 Средний</option>
+                                    <option value="high">🔴 Высокий</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата начала</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="newTaskDateEnd" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                             <div class="form-group"><label class="form-label" for="newTaskTime">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
-                        <div class="form-group"><label class="form-check"><input type="checkbox" id="newTaskUrgent" onclick="event.stopPropagation()"> Срочно</label></div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
+            initProjectSearch('newTaskProject', 'newTaskProjectDropdown');
         };
         
         window.showAddSubtaskModal = function(taskId) {
@@ -514,23 +555,31 @@
             const modal = document.querySelector('.modal-overlay.show .modal') || document;
             const submitBtn = modal.querySelector('.btn-primary') || this;
             await withButtonLock(submitBtn, async () => {
-                if (!validateForm([
-                    { id: 'newTaskName', required: true, message: 'Введите название' }
-                ])) return;
+                if (!validateForm([{ id: 'newTaskName', required: true, message: 'Введите название' }])) return;
                 const name = document.getElementById('newTaskName').value.trim();
-                
+                const projectInput = document.getElementById('newTaskProject');
+                const projectId = projectInput.dataset.selectedId || '';
+
+                // Confirm if no project
+                if (!projectId) {
+                    const confirmed = await showConfirmDialog('Поле «Проект» не заполнено. Сохранить?');
+                    if (!confirmed) return;
+                }
+
                 await CRM.addTask({
-                    project_id: document.getElementById('newTaskProject').value,
+                    project_id: projectId,
                     name: name,
                     column_status: 'Ожидает',
                     person: document.getElementById('newTaskPerson').value,
-                    date: document.getElementById('newTaskDate').value || '—',
+                    date: document.getElementById('newTaskDate').value || '',
+                    date_end: document.getElementById('newTaskDateEnd').value || '',
                     time: document.getElementById('newTaskTime').value || '',
                     done: false,
-                    urgent: document.getElementById('newTaskUrgent').checked,
+                    urgent: false,
+                    priority: document.getElementById('newTaskPriority').value,
                     hashtags: []
                 });
-                
+
                 closeModal();
                 showToast('Задача создана', 'success');
                 await CRM.load();
@@ -538,6 +587,82 @@
                 await loadActivity();
             });
         };
+
+        // ===== PROJECT AUTOCOMPLETE =====
+        function initProjectSearch(inputId, dropdownId) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            if (!input || !dropdown) return;
+            const projects = CRM.getProjects();
+
+            function showProjects(filter) {
+                const matches = filter
+                    ? projects.filter(p => (p.name + ' ' + p.client).toLowerCase().includes(filter.toLowerCase()))
+                    : projects;
+                if (matches.length === 0) { dropdown.classList.remove('show'); return; }
+                dropdown.innerHTML = matches.map(p =>
+                    `<div class="hashtag-dropdown-item" data-project-id="${p.id}" data-project-name="${p.client} — ${p.name}">${p.client} — ${p.name}</div>`
+                ).join('');
+                dropdown.classList.add('show');
+            }
+
+            input.addEventListener('focus', () => { showProjects(input.value.trim()); });
+            input.addEventListener('input', () => {
+                const val = input.value.trim();
+                if (!val) { input.dataset.selectedId = ''; }
+                showProjects(val);
+            });
+
+            dropdown.addEventListener('click', (e) => {
+                const item = e.target.closest('.hashtag-dropdown-item');
+                if (item) {
+                    input.value = item.dataset.projectName;
+                    input.dataset.selectedId = item.dataset.projectId;
+                    dropdown.classList.remove('show');
+                }
+            });
+        }
+
+        window.toggleProjectDropdown = function(dropdownId) {
+            const dropdown = document.getElementById(dropdownId);
+            if (!dropdown) return;
+            if (dropdown.classList.contains('show')) { dropdown.classList.remove('show'); }
+            else { showProjects(''); }
+        };
+
+        // ===== CONFIRM DIALOG =====
+        function showConfirmDialog(message) {
+            return new Promise(resolve => {
+                const overlay = document.getElementById('modalOverlay');
+                const dialog = document.createElement('div');
+                dialog.className = 'modal';
+                dialog.style.maxWidth = '380px';
+                dialog.onclick = e => e.stopPropagation();
+                dialog.innerHTML = `
+                    <div class="modal-body" style="text-align:center;padding:24px;">
+                        <p style="font-size:0.95rem;margin-bottom:20px;">${message}</p>
+                        <div style="display:flex;gap:8px;justify-content:center;">
+                            <button class="btn btn-secondary" id="confirmNo">Нет</button>
+                            <button class="btn btn-primary" id="confirmYes">Да</button>
+                        </div>
+                    </div>
+                `;
+                // Temporarily show overlay
+                const wasShown = overlay.classList.contains('show');
+                overlay.innerHTML = '';
+                overlay.appendChild(dialog);
+                if (!wasShown) { overlay.classList.add('show'); document.body.style.overflow = 'hidden'; }
+
+                dialog.querySelector('#confirmYes').onclick = () => {
+                    if (!wasShown) { overlay.classList.remove('show'); document.body.style.overflow = ''; }
+                    resolve(true);
+                };
+                dialog.querySelector('#confirmNo').onclick = () => {
+                    if (!wasShown) { overlay.classList.remove('show'); document.body.style.overflow = ''; }
+                    resolve(false);
+                };
+            });
+        }
         
         window.createSubtask = async function(taskId) {
             const modal = document.querySelector('.modal-overlay.show .modal') || document;
@@ -693,16 +818,21 @@
             if (!isOpen) dropdown.classList.add('show');
         };
 
-        // Color swatch click for task columns
+        // Unified click handler for palettes and swatches
         document.addEventListener('click', function(e) {
-            const swatch = e.target.closest('.color-swatch[data-type="task"]');
+            const swatch = e.target.closest('.color-swatch');
             if (swatch) {
+                e.stopPropagation();
                 const colId = parseInt(swatch.dataset.colId);
                 const color = swatch.dataset.color;
-                updateTaskColumnColor(colId, color);
                 swatch.parentElement.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
                 swatch.classList.add('active');
-                setTimeout(() => { swatch.closest('.color-palette-dropdown').classList.remove('show'); }, 200);
+                setTimeout(() => { swatch.closest('.color-palette-dropdown').classList.remove('show'); }, 100);
+                updateTaskColumnColor(colId, color);
+                return;
+            }
+            if (!e.target.closest('.color-palette-wrapper')) {
+                document.querySelectorAll('.color-palette-dropdown.show').forEach(d => d.classList.remove('show'));
             }
         });
 
