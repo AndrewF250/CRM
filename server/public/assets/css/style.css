@@ -767,6 +767,14 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 
 /* === HASHTAG AUTOCOMPLETE === */
 .hashtag-search-wrapper { position: relative; display: inline-block; }
+.hashtag-arrow {
+    position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    background: none; border: none; color: var(--gray-400); cursor: pointer;
+    border-radius: var(--radius-sm); transition: all 0.15s;
+}
+.hashtag-arrow:hover { color: var(--gray-700); background: var(--gray-100); }
+.hashtag-arrow.open { transform: translateY(-50%) rotate(180deg); }
 .hashtag-dropdown {
     position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px;
     background: var(--white); border: 1px solid var(--gray-200);
@@ -781,3 +789,4 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .hashtag-dropdown-item:hover { background: var(--primary-light); color: var(--primary); }
 .hashtag-dropdown-item:first-child { border-radius: var(--radius-md) var(--radius-md) 0 0; }
 .hashtag-dropdown-item:last-child { border-radius: 0 0 var(--radius-md) var(--radius-md); }
+.hashtag-dropdown-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
