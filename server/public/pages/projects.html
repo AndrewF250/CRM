@@ -48,6 +48,9 @@
         `;
         
         initCommonUI();
+        // Make content full-width for projects page
+        const contentWrapper = document.querySelector('.content-wrapper');
+        if (contentWrapper) contentWrapper.classList.add('full-width');
         await CRM.load();
         
         // Load hashtags for filter
