@@ -30,7 +30,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
+    project_id TEXT DEFAULT '',
     name TEXT NOT NULL,
     column_status TEXT DEFAULT 'Ожидает',
     person TEXT DEFAULT 'Костя',
@@ -40,8 +40,7 @@ db.exec(`
     urgent INTEGER DEFAULT 0,
     hashtags TEXT DEFAULT '[]',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS subtasks (
@@ -170,6 +169,42 @@ try {
   db.prepare("SELECT description FROM tasks LIMIT 1").get();
 } catch (e) {
   db.exec("ALTER TABLE tasks ADD COLUMN description TEXT DEFAULT ''");
+}
+
+// Migration: allow empty project_id in tasks (remove NOT NULL + FOREIGN KEY)
+try {
+  const cols = db.prepare("PRAGMA table_info(tasks)").all();
+  const pidCol = cols.find(c => c.name === 'project_id');
+  if (pidCol && pidCol.notnull === 1) {
+    const migrateTasks = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE tasks_new (
+          id TEXT PRIMARY KEY,
+          project_id TEXT DEFAULT '',
+          name TEXT NOT NULL,
+          column_status TEXT DEFAULT 'Ожидает',
+          person TEXT DEFAULT 'Костя',
+          date TEXT,
+          time TEXT,
+          done INTEGER DEFAULT 0,
+          urgent INTEGER DEFAULT 0,
+          hashtags TEXT DEFAULT '[]',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          parent_id TEXT DEFAULT NULL,
+          date_end TEXT DEFAULT '',
+          priority TEXT DEFAULT 'medium',
+          description TEXT DEFAULT ''
+        );
+        INSERT INTO tasks_new SELECT * FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks;
+      `);
+    });
+    migrateTasks();
+  }
+} catch (e) {
+  console.error('Tasks migration error:', e.message);
 }
 
 // Create kanban_columns table for configurable project columns

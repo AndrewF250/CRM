@@ -80,7 +80,7 @@ function renderSidebar(activePage) {
             <div class="nav-section">
                 <div class="nav-section-title">Система</div>
                 <a href="/pages/settings.html" class="nav-item${activePage === 'settings' ? ' active' : ''}">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg>
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
                     <span>Настройки</span>
                 </a>
             </div>
@@ -128,7 +128,7 @@ function renderHeader() {
                         <span class="notif-badge" id="notifBadge">0</span>
                     </button>
                     <div class="notif-dropdown" id="notifDropdown">
-                        <div class="notif-header"><span>Уведомления</span></div>
+                        <div class="notif-header"><span>Уведомления</span><button class="notif-clear" onclick="clearAllNotifications(event)">Очистить всё</button></div>
                         <div class="notif-list" id="notifList"></div>
                     </div>
                 </div>
@@ -148,47 +148,86 @@ function renderHeader() {
 
 // ==================== INIT COMMON UI ====================
 function initCommonUI() {
-    // Sidebar toggle
-    const toggle = document.getElementById('sidebarToggle');
-    const sidebar = document.getElementById('sidebar');
-    if (toggle && sidebar) {
-        // Create overlay for mobile
-        const overlay = document.createElement('div');
-        overlay.className = 'sidebar-overlay';
-        document.body.appendChild(overlay);
+    // Badges must refresh on every call: pages re-render the whole #app on tab
+    // switches, which resets the badge elements to their "0" template values
+    updateBadges();
 
-        toggle.addEventListener('click', () => {
-            sidebar.classList.toggle('open');
-            overlay.classList.toggle('show');
-        });
-        overlay.addEventListener('click', () => {
-            sidebar.classList.remove('open');
-            overlay.classList.remove('show');
-        });
-        document.addEventListener('click', (e) => {
-            if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !toggle.contains(e.target)) {
-                sidebar.classList.remove('open');
-                overlay.classList.remove('show');
-            }
-        });
-    }
+    if (window._commonUIInit) return;
+    window._commonUIInit = true;
 
-    // Dropdowns
-    const notifBtn = document.getElementById('notifBtn');
-    const notifDropdown = document.getElementById('notifDropdown');
-    if (notifBtn && notifDropdown) {
-        notifBtn.addEventListener('click', (e) => { e.stopPropagation(); closeAll(); notifDropdown.classList.toggle('show'); });
-    }
-    const userBtn = document.getElementById('userMenuBtn');
-    const userDropdown = document.getElementById('userDropdown');
-    if (userBtn && userDropdown) {
-        userBtn.addEventListener('click', (e) => { e.stopPropagation(); closeAll(); userDropdown.classList.toggle('show'); });
-    }
-    document.addEventListener('click', closeAll);
-    
+    // Overlay for mobile sidebar (lives outside #app, so created once)
+    const sidebarOverlay = document.createElement('div');
+    sidebarOverlay.className = 'sidebar-overlay';
+    document.body.appendChild(sidebarOverlay);
+    sidebarOverlay.addEventListener('click', () => {
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) sidebar.classList.remove('open');
+        sidebarOverlay.classList.remove('show');
+    });
+
     function closeAll() {
         document.querySelectorAll('.notif-dropdown.show, .user-dropdown.show').forEach(d => d.classList.remove('show'));
     }
+
+    // All header/sidebar clicks are delegated to document so they keep working
+    // after pages replace the whole DOM via app.innerHTML = ...
+    document.addEventListener('click', (e) => {
+        const sidebar = document.getElementById('sidebar');
+
+        if (e.target.closest('#sidebarToggle')) {
+            if (sidebar) {
+                sidebar.classList.toggle('open');
+                sidebarOverlay.classList.toggle('show');
+            }
+            return;
+        }
+
+        if (e.target.closest('#notifBtn')) {
+            const dd = document.getElementById('notifDropdown');
+            const wasOpen = dd && dd.classList.contains('show');
+            closeAll();
+            if (dd && !wasOpen) dd.classList.add('show');
+            return;
+        }
+
+        if (e.target.closest('#userMenuBtn')) {
+            const dd = document.getElementById('userDropdown');
+            const wasOpen = dd && dd.classList.contains('show');
+            closeAll();
+            if (dd && !wasOpen) dd.classList.add('show');
+            return;
+        }
+
+        closeAll();
+
+        if (sidebar && sidebar.classList.contains('open') && !sidebar.contains(e.target)) {
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('show');
+        }
+
+        // Tabs (.tab-btn with data-tab)
+        const tabBtn = e.target.closest('.tabs .tab-btn');
+        if (tabBtn) {
+            const target = tabBtn.dataset.tab;
+            if (target) {
+                const group = tabBtn.closest('.tabs');
+                group.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                tabBtn.classList.add('active');
+                group.parentElement.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                const el = document.getElementById(target);
+                if (el) el.classList.add('active');
+            }
+            return;
+        }
+
+        // Filter chips
+        const chip = e.target.closest('.filter-bar .filter-chip');
+        if (chip && !chip.classList.contains('cal-filter') && !chip.classList.contains('cal-filter-person')) {
+            const bar = chip.closest('.filter-bar');
+            bar.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+        }
+    });
 
     // Modal overlay
     const overlay = document.getElementById('modalOverlay');
@@ -224,34 +263,6 @@ function initCommonUI() {
         });
     }
 
-    // Tabs
-    document.querySelectorAll('.tabs').forEach(group => {
-        const btns = group.querySelectorAll('.tab-btn');
-        btns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const target = btn.dataset.tab;
-                if (!target) return;
-                btns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                const parent = group.parentElement;
-                parent.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                const el = document.getElementById(target);
-                if (el) el.classList.add('active');
-            });
-        });
-    });
-
-    // Filter chips
-    document.querySelectorAll('.filter-bar .filter-chip:not(.cal-filter):not(.cal-filter-person)').forEach(chip => {
-        chip.addEventListener('click', () => {
-            const bar = chip.closest('.filter-bar');
-            bar.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
-            chip.classList.add('active');
-        });
-    });
-
-    // Update badges
-    updateBadges();
 }
 
 // Update sidebar badges
@@ -264,10 +275,91 @@ async function updateBadges() {
         
         if (projectsBadge) projectsBadge.textContent = stats.activeProjects;
         if (tasksBadge) tasksBadge.textContent = stats.pendingTasks;
-        if (notifBadge) notifBadge.textContent = stats.overdueTasks;
+
+        // Load active reminders for notifications
+        let notifCount = 0;
+        try {
+            const reminders = await API.get('/api/reminders?active=true');
+            const notifList = document.getElementById('notifList');
+            if (reminders && reminders.length > 0) {
+                notifCount = reminders.length;
+                if (notifList) {
+                    notifList.innerHTML = reminders.map(r => {
+                        const date = r.remind_date ? new Date(r.remind_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
+                        return `<div class="notif-item unread" data-reminder-id="${r.id}">
+                            <div class="notif-dot"></div>
+                            <div class="notif-content">
+                                <p>${r.message}</p>
+                                <span class="notif-time">${date}</span>
+                            </div>
+                            <button class="notif-dismiss" onclick="dismissNotification(${r.id}, event)" title="Закрыть" aria-label="Закрыть уведомление">&times;</button>
+                        </div>`;
+                    }).join('');
+                }
+            } else {
+                if (notifList) notifList.innerHTML = '<div style="padding:20px;text-align:center;font-size:0.85rem;color:var(--gray-400);">Нет уведомлений</div>';
+            }
+        } catch (err) {}
+
+        if (notifBadge) {
+            notifBadge.textContent = notifCount;
+            notifBadge.style.display = notifCount > 0 ? 'flex' : 'none';
+        }
     } catch (err) {
         console.error('Failed to update badges:', err);
     }
+}
+
+// Dismiss a single notification
+async function dismissNotification(reminderId, e) {
+    if (e) e.stopPropagation();
+    try {
+        await API.delete(`/api/reminders/${reminderId}`);
+        const item = document.querySelector(`.notif-item[data-reminder-id="${reminderId}"]`);
+        if (item) {
+            item.style.transition = 'opacity 0.2s, transform 0.2s';
+            item.style.opacity = '0';
+            item.style.transform = 'translateX(20px)';
+            setTimeout(() => item.remove(), 200);
+        }
+        // Update badge count
+        const badge = document.getElementById('notifBadge');
+        if (badge) {
+            const count = parseInt(badge.textContent) || 0;
+            const newCount = Math.max(0, count - 1);
+            badge.textContent = newCount;
+            badge.style.display = newCount > 0 ? 'flex' : 'none';
+        }
+        // Show empty state if no more items
+        setTimeout(() => {
+            const list = document.getElementById('notifList');
+            if (list && !list.querySelector('.notif-item')) {
+                list.innerHTML = '<div style="padding:20px;text-align:center;font-size:0.85rem;color:var(--gray-400);">Нет уведомлений</div>';
+            }
+        }, 250);
+    } catch (err) {}
+}
+
+// Clear all notifications
+async function clearAllNotifications(e) {
+    if (e) e.stopPropagation();
+    const items = document.querySelectorAll('.notif-item[data-reminder-id]');
+    if (items.length === 0) return;
+    try {
+        for (const item of items) {
+            const id = item.dataset.reminderId;
+            await API.delete(`/api/reminders/${id}`);
+            item.style.transition = 'opacity 0.2s, transform 0.2s';
+            item.style.opacity = '0';
+            item.style.transform = 'translateX(20px)';
+        }
+        setTimeout(() => {
+            const list = document.getElementById('notifList');
+            if (list) list.innerHTML = '<div style="padding:20px;text-align:center;font-size:0.85rem;color:var(--gray-400);">Нет уведомлений</div>';
+            const badge = document.getElementById('notifBadge');
+            if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+        }, 250);
+    } catch (err) {}
 }
 
 // ==================== STATUS HELPERS ====================

@@ -27,7 +27,7 @@
         .activity-time { font-size: 0.75rem; color: var(--gray-400); margin-top: 2px; }
         .layout-2col { display: grid; grid-template-columns: 1fr 350px; gap: 24px; }
         @media (max-width: 1200px) { .layout-2col { grid-template-columns: 1fr; } }
-        .task-actions { display: flex; gap: 4px; align-items: center; }
+        .task-actions { display: flex; gap: 4px; align-items: center; position: relative; }
         .task-action-btn {
             width: 32px; height: 32px; border-radius: var(--radius-md);
             display: flex; align-items: center; justify-content: center;
@@ -41,7 +41,29 @@
         .task-action-btn.play:hover { background: var(--success-light); }
         .task-action-btn.restart:hover { border-color: var(--info); color: var(--info); background: var(--info-light); }
         .task-action-btn.gear:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-100); }
+        .task-action-btn.add-child:hover { border-color: var(--success); color: var(--success); background: var(--success-light); }
+        .task-action-btn.clone:hover { border-color: var(--info); color: var(--info); background: var(--info-light); }
+        .task-action-btn.delete:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-light); }
         .task-action-btn.unparent { font-size: 0.8rem; font-weight: 700; }
+        .task-action-btn.task-menu-btn { border-color: transparent; color: var(--gray-500); }
+        .task-action-btn.task-menu-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+        .task-menu-dropdown {
+            display: none; position: absolute; right: 0; top: calc(100% + 4px);
+            background: var(--white); border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+            z-index: 300; min-width: 180px; padding: 4px;
+        }
+        .task-menu-dropdown.show { display: block; }
+        .task-menu-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; font-size: 0.82rem; color: var(--gray-700);
+            border-radius: var(--radius-sm); cursor: pointer; transition: background 0.1s;
+            white-space: nowrap;
+        }
+        .task-menu-item:hover { background: var(--primary-light); color: var(--primary); }
+        .task-menu-item.danger:hover { background: var(--danger-light); color: var(--danger); }
+        .task-menu-item svg { flex-shrink: 0; }
+        .task-menu-sep { height: 1px; background: var(--gray-100); margin: 4px 0; }
         .task-card.paused { border-left: 3px solid var(--warning); }
     </style>
 </head>
@@ -49,9 +71,9 @@
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=6"></script>
-    <script src="/assets/js/app.js?v=6"></script>
-    <script src="/assets/js/crm-data.js?v=6"></script>
+    <script src="/assets/js/api.js?v=8"></script>
+    <script src="/assets/js/app.js?v=8"></script>
+    <script src="/assets/js/crm-data.js?v=8"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -64,10 +86,17 @@
                     <button class="btn btn-ghost btn-icon" onclick="showTaskColumnConfigModal()" title="Настройки статусов" aria-label="Настройки статусов" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
                     <p class="page-subtitle">Все задачи по проектам</p>
                 </div>
-                <div class="page-actions"><button class="btn btn-primary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новая задача</button></div>
+                <div class="page-actions">
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn btn-secondary btn-sm" id="viewList" onclick="switchTaskView('list')" style="background:var(--primary-light);color:var(--primary);border-color:var(--primary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg> Список</button>
+                        <button class="btn btn-secondary btn-sm" id="viewKanban" onclick="switchTaskView('kanban')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> Канбан</button>
+                    </div>
+                    <button class="btn btn-primary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новая задача</button>
+                </div>
             </div>
             <div class="filter-bar" id="taskFilters" style="flex-wrap:wrap;"></div>
-            <div class="layout-2col">
+            <div id="taskKanbanView" class="hidden"></div>
+            <div id="taskListView" class="layout-2col">
                 <div id="tasksList"></div>
                 <div id="activityFeed">
                     <div class="card">
@@ -80,10 +109,14 @@
         `;
         
         initCommonUI();
+        // Make content full-width for kanban support
+        const contentWrapper = document.querySelector('.content-wrapper');
+        if (contentWrapper) contentWrapper.classList.add('full-width');
         await CRM.load();
 
         let currentFilter = 'all';
         let currentTimeFilter = 'all';
+        let currentPersonFilter = 'all';
         let taskColumns = [];
 
         // Load task columns
@@ -104,30 +137,43 @@
 
         function renderTaskFilters() {
             const container = document.getElementById('taskFilters');
-            let html = '<span class="text-sm text-muted" style="margin-right:4px;">Статус:</span>';
-            html += `<button class="filter-chip${currentFilter === 'all' ? ' active' : ''}" onclick="filterTasks('all', this)">Все</button>`;
+            let statusOptions = '<option value="all"' + (currentFilter === 'all' ? ' selected' : '') + '>Все статусы</option>';
             taskColumns.forEach(col => {
-                html += `<button class="filter-chip${currentFilter === col.name ? ' active' : ''}" onclick="filterTasks('${col.name}', this)">${col.name}</button>`;
+                statusOptions += '<option value="' + col.name + '"' + (currentFilter === col.name ? ' selected' : '') + '>' + col.name + '</option>';
             });
-            html += '<span class="text-sm text-muted" style="margin-left:16px;margin-right:4px;">Время:</span>';
-            html += `<button class="filter-chip${currentTimeFilter === 'all' ? ' active' : ''}" onclick="filterTime('all', this)">Все</button>`;
-            html += `<button class="filter-chip${currentTimeFilter === 'today' ? ' active' : ''}" onclick="filterTime('today', this)">Сегодня</button>`;
-            html += `<button class="filter-chip${currentTimeFilter === 'tomorrow' ? ' active' : ''}" onclick="filterTime('tomorrow', this)">Завтра</button>`;
-            html += `<button class="filter-chip${currentTimeFilter === 'week' ? ' active' : ''}" onclick="filterTime('week', this)">Неделя</button>`;
-            html += `<button class="filter-chip${currentTimeFilter === 'overdue' ? ' active' : ''}" onclick="filterTime('overdue', this)">Просроченные</button>`;
+
+            let timeOptions = '<option value="all"' + (currentTimeFilter === 'all' ? ' selected' : '') + '>Все время</option>';
+            timeOptions += '<option value="today"' + (currentTimeFilter === 'today' ? ' selected' : '') + '>Сегодня</option>';
+            timeOptions += '<option value="tomorrow"' + (currentTimeFilter === 'tomorrow' ? ' selected' : '') + '>Завтра</option>';
+            timeOptions += '<option value="week"' + (currentTimeFilter === 'week' ? ' selected' : '') + '>Неделя</option>';
+            timeOptions += '<option value="overdue"' + (currentTimeFilter === 'overdue' ? ' selected' : '') + '>Просроченные</option>';
+
+            let personOptions = '<option value="all"' + (currentPersonFilter === 'all' ? ' selected' : '') + '>Все исполнители</option>';
+            personOptions += '<option value="Костя"' + (currentPersonFilter === 'Костя' ? ' selected' : '') + '>Костя</option>';
+            personOptions += '<option value="Максим"' + (currentPersonFilter === 'Максим' ? ' selected' : '') + '>Максим</option>';
+            personOptions += '<option value="Андрей"' + (currentPersonFilter === 'Андрей' ? ' selected' : '') + '>Андрей</option>';
+
+            let html = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">';
+            html += '<div style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Статус:</span><select class="form-select" style="width:auto;min-width:140px;padding:6px 32px 6px 10px;font-size:0.8rem;" onchange="filterTasks(this.value)">' + statusOptions + '</select></div>';
+            html += '<div style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Время:</span><select class="form-select" style="width:auto;min-width:140px;padding:6px 32px 6px 10px;font-size:0.8rem;" onchange="filterTime(this.value)">' + timeOptions + '</select></div>';
+            html += '<div style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Исполнитель:</span><select class="form-select" style="width:auto;min-width:150px;padding:6px 32px 6px 10px;font-size:0.8rem;" onchange="filterByPerson(this.value)">' + personOptions + '</select></div>';
+            html += '</div>';
             container.innerHTML = html;
         }
         renderTaskFilters();
         
-        window.filterTasks = function(filter, btn) {
+        window.filterTasks = function(filter) {
             currentFilter = filter;
-            renderTaskFilters();
             renderTasks();
         };
 
-        window.filterTime = function(filter, btn) {
+        window.filterTime = function(filter) {
             currentTimeFilter = filter;
-            renderTaskFilters();
+            renderTasks();
+        };
+
+        window.filterByPerson = function(filter) {
+            currentPersonFilter = filter;
             renderTasks();
         };
         
@@ -156,6 +202,23 @@
                 showToast('Ошибка', 'error');
             }
         };
+
+        // Toggle task action menu dropdown
+        window.toggleTaskMenu = function(btn) {
+            const dropdown = btn.nextElementSibling;
+            if (!dropdown) return;
+            const isOpen = dropdown.classList.contains('show');
+            // Close all other menus first
+            document.querySelectorAll('.task-menu-dropdown.show').forEach(d => d.classList.remove('show'));
+            if (!isOpen) dropdown.classList.add('show');
+        };
+
+        // Close task menus on outside click
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.task-actions')) {
+                document.querySelectorAll('.task-menu-dropdown.show').forEach(d => d.classList.remove('show'));
+            }
+        });
 
         window.toggleTaskDone = async function(taskId) {
             try {
@@ -196,7 +259,62 @@
             }
         };
 
-        window.showEditTaskModal = function(taskId) {
+        // Auto-save debounce timer for task editing
+        let autoSaveTimer = null;
+        let autoSaveTaskId = null;
+
+        function autoSaveTask() {
+            if (!autoSaveTaskId) return;
+            if (autoSaveTimer) clearTimeout(autoSaveTimer);
+            autoSaveTimer = setTimeout(async () => {
+                const indicator = document.getElementById('autoSaveIndicator');
+                const nameEl = document.getElementById('editTaskName');
+                if (!nameEl) return; // Modal was closed
+                if (indicator) { indicator.textContent = 'Сохраняется...'; indicator.style.color = 'var(--gray-400)'; }
+                try {
+                    const projectInput = document.getElementById('editTaskProject');
+                    const projectId = (projectInput && projectInput.dataset.selectedId) ? projectInput.dataset.selectedId : '';
+                    const name = nameEl.value.trim();
+                    if (!name) return;
+                    const column_status = document.getElementById('editTaskStatus').value;
+                    const done = column_status === 'Готово';
+                    await CRM.updateTask(autoSaveTaskId, {
+                        name: name,
+                        project_id: projectId,
+                        person: document.getElementById('editTaskPerson').value,
+                        column_status: column_status,
+                        date: document.getElementById('editTaskDate').value || '',
+                        date_end: document.getElementById('editTaskDateEnd').value || '',
+                        time: document.getElementById('editTaskTime').value || '',
+                        done: done,
+                        urgent: false,
+                        priority: document.getElementById('editTaskPriority').value,
+                        description: document.getElementById('editTaskDesc').value.trim()
+                    });
+                    // Don't re-render list during editing — cache is already updated by CRM.updateTask
+                    if (indicator) { indicator.textContent = 'Сохранено'; indicator.style.color = 'var(--success)'; }
+                } catch (err) {
+                    if (indicator) { indicator.textContent = 'Ошибка'; indicator.style.color = 'var(--danger)'; }
+                }
+                setTimeout(() => { const el = document.getElementById('autoSaveIndicator'); if (el) el.textContent = ''; }, 2000);
+            }, 500);
+        }
+
+        function bindAutoSave() {
+            const fields = ['editTaskName', 'editTaskDesc', 'editTaskProject', 'editTaskPerson', 'editTaskPriority', 'editTaskStatus', 'editTaskDate', 'editTaskDateEnd', 'editTaskTime'];
+            fields.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('input', autoSaveTask);
+                el.addEventListener('change', autoSaveTask);
+            });
+        }
+
+        window.showEditTaskModal = function(taskId, cloneMode) {
+            // Reset auto-save state
+            if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+            autoSaveTaskId = null;
+
             const task = CRM.getTasks().find(t => t.id === taskId);
             if (!task) return;
             const overlay = document.getElementById('modalOverlay');
@@ -212,39 +330,137 @@
                 <option value="high" ${task.priority === 'high' ? 'selected' : ''}>🔴 Высокий</option>
             `;
 
-            overlay.innerHTML = `
-                <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Редактировать задачу</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-                    <div class="modal-body">
-                        <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                        <div class="form-group"><label class="form-label" for="editTaskDesc">Описание</label><textarea class="form-textarea" id="editTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${task.description || ''}</textarea></div>
-                        <div class="form-group">
-                            <label class="form-label">Проект</label>
-                            <div class="hashtag-search-wrapper" style="width:100%;">
-                                <input type="text" class="form-input" id="editTaskProject" value="${projectLabel}" data-selected-id="${task.project_id || ''}" placeholder="Поиск проекта..." autocomplete="off" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">
-                                <button class="hashtag-arrow" onclick="event.stopPropagation();toggleProjectDropdown('editTaskProjectDropdown')" aria-label="Показать все проекты"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button>
-                                <div class="hashtag-dropdown" id="editTaskProjectDropdown"></div>
+            if (cloneMode) {
+                // Clone mode — standard modal with submit button
+                overlay.innerHTML = `
+                    <div class="modal" onclick="event.stopPropagation()">
+                        <div class="modal-header"><h3 class="modal-title">Копировать задачу</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                        <div class="modal-body">
+                            <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editTaskDesc">Описание</label><textarea class="form-textarea" id="editTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${task.description || ''}</textarea></div>
+                            <div class="form-group">
+                                <label class="form-label">Проект</label>
+                                <div class="hashtag-search-wrapper" style="width:100%;">
+                                    <input type="text" class="form-input" id="editTaskProject" value="${projectLabel}" data-selected-id="${task.project_id || ''}" placeholder="Поиск проекта..." autocomplete="off" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">
+                                    <button class="hashtag-arrow" onclick="event.stopPropagation();toggleProjectDropdown('editTaskProjectDropdown')" aria-label="Показать все проекты"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button>
+                                    <div class="hashtag-dropdown" id="editTaskProjectDropdown"></div>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label class="form-label" for="editTaskPerson">Исполнитель</label><select class="form-select" id="editTaskPerson" onclick="event.stopPropagation()"><option ${task.person === 'Костя' ? 'selected' : ''}>Костя</option><option ${task.person === 'Максим' ? 'selected' : ''}>Максим</option><option ${task.person === 'Андрей' ? 'selected' : ''}>Андрей</option></select></div>
+                                <div class="form-group"><label class="form-label" for="editTaskPriority">Приоритет</label><select class="form-select" id="editTaskPriority" onclick="event.stopPropagation()">${priorityOptions}</select></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label class="form-label" for="editTaskStatus">Статус</label><select class="form-select" id="editTaskStatus" onclick="event.stopPropagation()">${statusOptions}</select></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label class="form-label" for="editTaskDate">Дата начала</label><input type="date" class="form-input" id="editTaskDate" value="${task.date || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="editTaskDateEnd" value="${task.date_end || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskTime">Время</label><input type="time" class="form-input" id="editTaskTime" value="${task.time || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                             </div>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="editTaskPerson">Исполнитель</label><select class="form-select" id="editTaskPerson" onclick="event.stopPropagation()"><option ${task.person === 'Костя' ? 'selected' : ''}>Костя</option><option ${task.person === 'Максим' ? 'selected' : ''}>Максим</option><option ${task.person === 'Андрей' ? 'selected' : ''}>Андрей</option></select></div>
-                            <div class="form-group"><label class="form-label" for="editTaskPriority">Приоритет</label><select class="form-select" id="editTaskPriority" onclick="event.stopPropagation()">${priorityOptions}</select></div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="editTaskStatus">Статус</label><select class="form-select" id="editTaskStatus" onclick="event.stopPropagation()">${statusOptions}</select></div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="editTaskDate">Дата начала</label><input type="date" class="form-input" id="editTaskDate" value="${task.date || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="editTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="editTaskDateEnd" value="${task.date_end || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="editTaskTime">Время</label><input type="time" class="form-input" id="editTaskTime" value="${task.time || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                        </div>
+                        <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTaskCopy('${taskId}')">Создать копию</button></div>
                     </div>
-                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="saveTaskEdit('${taskId}')">Сохранить</button></div>
-                </div>
-            `;
+                `;
+            } else {
+                // Edit mode — auto-save, no submit button
+                autoSaveTaskId = taskId;
+                overlay.innerHTML = `
+                    <div class="modal" onclick="event.stopPropagation()">
+                        <div class="modal-header">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <h3 class="modal-title">Редактировать задачу</h3>
+                                <span id="autoSaveIndicator" style="font-size:0.8rem;font-weight:500;transition:color 0.3s;"></span>
+                            </div>
+                            <button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="editTaskDesc">Описание</label><textarea class="form-textarea" id="editTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${task.description || ''}</textarea></div>
+                            <div class="form-group">
+                                <label class="form-label">Проект</label>
+                                <div class="hashtag-search-wrapper" style="width:100%;">
+                                    <input type="text" class="form-input" id="editTaskProject" value="${projectLabel}" data-selected-id="${task.project_id || ''}" placeholder="Поиск проекта..." autocomplete="off" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">
+                                    <button class="hashtag-arrow" onclick="event.stopPropagation();toggleProjectDropdown('editTaskProjectDropdown')" aria-label="Показать все проекты"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button>
+                                    <div class="hashtag-dropdown" id="editTaskProjectDropdown"></div>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label class="form-label" for="editTaskPerson">Исполнитель</label><select class="form-select" id="editTaskPerson" onclick="event.stopPropagation()"><option ${task.person === 'Костя' ? 'selected' : ''}>Костя</option><option ${task.person === 'Максим' ? 'selected' : ''}>Максим</option><option ${task.person === 'Андрей' ? 'selected' : ''}>Андрей</option></select></div>
+                                <div class="form-group"><label class="form-label" for="editTaskPriority">Приоритет</label><select class="form-select" id="editTaskPriority" onclick="event.stopPropagation()">${priorityOptions}</select></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label class="form-label" for="editTaskStatus">Статус</label><select class="form-select" id="editTaskStatus" onclick="event.stopPropagation()">${statusOptions}</select></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label class="form-label" for="editTaskDate">Дата начала</label><input type="date" class="form-input" id="editTaskDate" value="${task.date || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="editTaskDateEnd" value="${task.date_end || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskTime">Время</label><input type="time" class="form-input" id="editTaskTime" value="${task.time || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer" style="justify-content:center;"><span style="font-size:0.8rem;color:var(--gray-400);">Изменения сохраняются автоматически</span></div>
+                    </div>
+                `;
+                bindAutoSave();
+            }
+
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
             initProjectSearch('editTaskProject', 'editTaskProjectDropdown');
+
+            // When edit modal closes, refresh the task list
+            if (!cloneMode) {
+                const observer = new MutationObserver(() => {
+                    if (!overlay.classList.contains('show')) {
+                        observer.disconnect();
+                        autoSaveTaskId = null;
+                        CRM.load().then(() => { renderTasks(); loadActivity(); });
+                    }
+                });
+                observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+            }
+        };
+
+        // Clone task — opens edit modal in clone mode
+        window.cloneTask = function(taskId) {
+            showEditTaskModal(taskId, true);
+        };
+
+        // Create a copy of the task from the clone modal
+        window.createTaskCopy = async function(originalId) {
+            const modal = document.querySelector('.modal-overlay.show .modal') || document;
+            const submitBtn = modal.querySelector('.btn-primary') || this;
+            await withButtonLock(submitBtn, async () => {
+                if (!validateForm([{ id: 'editTaskName', required: true, message: 'Введите название' }])) return;
+                const projectInput = document.getElementById('editTaskProject');
+                const projectId = (projectInput && projectInput.dataset.selectedId) ? projectInput.dataset.selectedId : '';
+
+                try {
+                    await CRM.addTask({
+                        project_id: projectId,
+                        name: document.getElementById('editTaskName').value.trim(),
+                        column_status: document.getElementById('editTaskStatus').value,
+                        person: document.getElementById('editTaskPerson').value,
+                        date: document.getElementById('editTaskDate').value || '',
+                        date_end: document.getElementById('editTaskDateEnd').value || '',
+                        time: document.getElementById('editTaskTime').value || '',
+                        done: false,
+                        urgent: false,
+                        priority: document.getElementById('editTaskPriority').value,
+                        description: document.getElementById('editTaskDesc').value.trim(),
+                        hashtags: []
+                    });
+                } catch (err) {
+                    showToast('Ошибка копирования: ' + (err.message || 'Неизвестная ошибка'), 'error');
+                    return;
+                }
+
+                closeModal();
+                showToast('Копия создана', 'success');
+                await CRM.load();
+                await renderTasks();
+                await loadActivity();
+            });
         };
 
         window.saveTaskEdit = async function(taskId) {
@@ -319,9 +535,38 @@
             }
         }
         
+        // Shared helper: build task action menu items HTML
+        function buildTaskMenuItems(t, isChild) {
+            const isPaused = t.column_status === 'Простой';
+            const isDone = t.done;
+            let items = '';
+            if (isDone) {
+                items += `<div class="task-menu-item" onclick="event.stopPropagation();restartTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 105.93-12.55L1 10"/></svg> Вернуть в работу</div>`;
+            } else {
+                items += `<div class="task-menu-item" onclick="event.stopPropagation();toggleTaskDone('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg> Выполнено</div>`;
+                items += isPaused
+                    ? `<div class="task-menu-item" onclick="event.stopPropagation();toggleTaskPause('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Продолжить</div>`
+                    : `<div class="task-menu-item" onclick="event.stopPropagation();toggleTaskPause('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Пауза</div>`;
+            }
+            items += `<div class="task-menu-item" onclick="event.stopPropagation();showEditTaskModal('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg> Настройки</div>`;
+            items += `<div class="task-menu-item" onclick="event.stopPropagation();showAddSubtaskModal('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Подзадача</div>`;
+            items += `<div class="task-menu-item" onclick="event.stopPropagation();cloneTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Копировать</div>`;
+            if (isChild) {
+                items += `<div class="task-menu-item" onclick="event.stopPropagation();unparentTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5,12 12,5 19,12"/></svg> Открепить</div>`;
+            }
+            items += `<div class="task-menu-sep"></div>`;
+            items += `<div class="task-menu-item danger" onclick="event.stopPropagation();deleteTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Удалить</div>`;
+            return items;
+        }
+
         async function renderTasks() {
             let tasks = CRM.getTasks();
             if (currentFilter !== 'all') tasks = tasks.filter(t => t.column_status === currentFilter);
+
+            // Person filter
+            if (currentPersonFilter !== 'all') {
+                tasks = tasks.filter(t => t.person === currentPersonFilter);
+            }
 
             // Time filter
             const today = new Date();
@@ -375,20 +620,7 @@
                 const children = childrenMap[t.id] || [];
                 const isPaused = t.column_status === 'Простой';
                 const isDone = t.done;
-
-                // Action buttons
-                let actionBtns = '';
-                if (isDone) {
-                    actionBtns += `<button class="task-action-btn restart" onclick="restartTask('${t.id}')" title="Вернуть в работу" aria-label="Вернуть в работу"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 105.93-12.55L1 10"/></svg></button>`;
-                } else {
-                    actionBtns += `<button class="task-action-btn done" onclick="toggleTaskDone('${t.id}')" title="Выполнено" aria-label="Выполнено"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg></button>`;
-                    if (isPaused) {
-                        actionBtns += `<button class="task-action-btn play" onclick="toggleTaskPause('${t.id}')" title="Продолжить" aria-label="Продолжить"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>`;
-                    } else {
-                        actionBtns += `<button class="task-action-btn pause" onclick="toggleTaskPause('${t.id}')" title="Пауза" aria-label="Пауза"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>`;
-                    }
-                }
-                actionBtns += `<button class="task-action-btn gear" onclick="showEditTaskModal('${t.id}')" title="Настройки" aria-label="Настройки"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>`;
+                const menuItems = buildTaskMenuItems(t, isChild);
 
                 const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
                 const priorityLabel = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
@@ -415,8 +647,8 @@
                                     ${subtasks.length > 0 ? '<div style="margin-top:4px;font-size:0.75rem;color:var(--gray-400);">Чеклист: ' + doneSubtasks + '/' + subtasks.length + '</div>' : ''}
                                 </div>
                                 <div class="task-actions">
-                                    ${isChild ? '<button class="task-action-btn unparent" onclick="unparentTask(\'' + t.id + '\')" title="Открепить" aria-label="Открепить">↑</button>' : ''}
-                                    ${actionBtns}
+                                    <button class="task-action-btn task-menu-btn" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskMenu(this)" title="Действия" aria-label="Меню действий"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+                                    <div class="task-menu-dropdown">${menuItems}</div>
                                 </div>
                             </div>
                             ${subtasks.length > 0 ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);">' + subtasks.map(s => `
@@ -450,6 +682,160 @@
             
             document.getElementById('tasksList').innerHTML = html;
             initTaskDragAndDrop();
+            // Also refresh Kanban if it's the active view
+            if (currentTaskView === 'kanban') renderTaskKanban();
+        }
+
+        // ===== TASK VIEW SWITCHING =====
+        let currentTaskView = 'list';
+
+        window.switchTaskView = function(view) {
+            currentTaskView = view;
+            const listView = document.getElementById('taskListView');
+            const kanbanView = document.getElementById('taskKanbanView');
+            const btnList = document.getElementById('viewList');
+            const btnKanban = document.getElementById('viewKanban');
+
+            if (view === 'kanban') {
+                listView.classList.add('hidden');
+                kanbanView.classList.remove('hidden');
+                btnKanban.style.background = 'var(--primary-light)';
+                btnKanban.style.color = 'var(--primary)';
+                btnKanban.style.borderColor = 'var(--primary)';
+                btnList.style.background = '';
+                btnList.style.color = '';
+                btnList.style.borderColor = '';
+                renderTaskKanban();
+            } else {
+                listView.classList.remove('hidden');
+                kanbanView.classList.add('hidden');
+                btnList.style.background = 'var(--primary-light)';
+                btnList.style.color = 'var(--primary)';
+                btnList.style.borderColor = 'var(--primary)';
+                btnKanban.style.background = '';
+                btnKanban.style.color = '';
+                btnKanban.style.borderColor = '';
+            }
+        };
+
+        function renderTaskKanban() {
+            let tasks = CRM.getTasks();
+            // Apply status filter
+            if (currentFilter !== 'all') {
+                tasks = tasks.filter(t => t.column_status === currentFilter);
+            }
+            // Apply person filter
+            if (currentPersonFilter !== 'all') {
+                tasks = tasks.filter(t => t.person === currentPersonFilter);
+            }
+            // Apply time filter
+            const today = new Date(); today.setHours(0,0,0,0);
+            const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+            const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+            if (currentTimeFilter === 'today') {
+                tasks = tasks.filter(t => t.date === today.toISOString().split('T')[0]);
+            } else if (currentTimeFilter === 'tomorrow') {
+                tasks = tasks.filter(t => t.date === tomorrow.toISOString().split('T')[0]);
+            } else if (currentTimeFilter === 'week') {
+                tasks = tasks.filter(t => { if (!t.date) return false; const d = new Date(t.date); return d >= today && d <= weekEnd; });
+            } else if (currentTimeFilter === 'overdue') {
+                tasks = tasks.filter(t => { if (!t.date || t.done) return false; return new Date(t.date) < today; });
+            }
+
+            const colorHexMap = { blue: '#3B82F6', yellow: '#F59E0B', green: '#10B981', gray: '#9CA3AF', red: '#EF4444', purple: '#8B5CF6', pink: '#EC4899', orange: '#F97316', teal: '#14B8A6', indigo: '#6366F1', lime: '#84CC16', cyan: '#06B6D4' };
+            function getColHex(color) { return colorHexMap[color] || (color && color.startsWith('#') ? color : '#9CA3AF'); }
+
+            let html = '<div class="kanban-board">';
+            taskColumns.forEach(col => {
+                const colTasks = tasks.filter(t => t.column_status === col.name && !t.parent_id);
+                const hex = getColHex(col.color);
+                html += `<div class="kanban-column"><div class="kanban-column-header"><div class="kanban-column-title"><span class="status-dot" style="background:${hex}"></span> ${col.name} <span class="kanban-count">${colTasks.length}</span></div></div><div class="kanban-column-body" data-column="${col.name}">`;
+                colTasks.forEach(t => {
+                    const project = CRM.getProject(t.project_id);
+                    const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
+                    const children = tasks.filter(ch => ch.parent_id === t.id);
+                    html += `<div class="kanban-card${t.done ? ' done' : ''}" draggable="true" data-task-id="${t.id}" style="${t.column_status === 'Простой' ? 'border-left:3px solid var(--warning);' : ''}">
+                        <div style="display:flex;justify-content:space-between;align-items:start;">
+                            <div class="kanban-card-title" style="${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
+                            <span title="${t.priority || 'medium'}">${priorityEmoji[t.priority] || '🟡'}</span>
+                        </div>
+                        ${t.description ? '<div style="font-size:0.75rem;color:var(--gray-500);margin:4px 0;white-space:pre-wrap;">' + t.description.slice(0,80) + (t.description.length > 80 ? '...' : '') + '</div>' : ''}
+                        <div class="kanban-card-client">${t.person}${t.date ? ' · ' + t.date : ''}${t.time ? ' ' + t.time : ''}</div>
+                        ${project ? '<div style="font-size:0.7rem;color:var(--primary);margin-top:2px;">' + project.name + '</div>' : ''}
+                        ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + ' подзадач</span>' : ''}
+                        <div class="kanban-card-footer">
+                            <span class="kanban-card-status"><span class="status-dot" style="background:${hex}"></span> ${col.name}</span>
+                            <div class="task-actions" style="display:flex;gap:2px;">
+                                <button class="btn btn-ghost btn-sm task-menu-btn" draggable="false" ondragstart="event.preventDefault()" style="padding:2px 6px;font-size:0.7rem;" onclick="event.stopPropagation();toggleTaskMenu(this)" title="Действия">☰</button>
+                                <div class="task-menu-dropdown">${buildTaskMenuItems(t, false)}</div>
+                            </div>
+                        </div>
+                    </div>`;
+                });
+                html += '</div></div>';
+            });
+            html += '</div>';
+            document.getElementById('taskKanbanView').innerHTML = html;
+            initTaskKanbanDragDrop();
+        }
+
+        function initTaskKanbanDragDrop() {
+            const cards = document.querySelectorAll('#taskKanbanView .kanban-card[draggable]');
+            const columns = document.querySelectorAll('#taskKanbanView .kanban-column-body');
+
+            cards.forEach(card => {
+                card.addEventListener('dragstart', function(e) {
+                    this.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', this.dataset.taskId);
+                });
+                card.addEventListener('dragend', function() {
+                    this.classList.remove('dragging');
+                    document.querySelectorAll('#taskKanbanView .kanban-column-body').forEach(col => {
+                        col.style.background = '';
+                        col.style.minHeight = '';
+                    });
+                });
+            });
+
+            columns.forEach(col => {
+                col.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    this.style.background = 'rgba(99,102,241,0.08)';
+                    this.style.minHeight = '100px';
+                });
+                col.addEventListener('dragleave', function() {
+                    this.style.background = '';
+                    this.style.minHeight = '';
+                });
+                col.addEventListener('drop', async function(e) {
+                    e.preventDefault();
+                    this.style.background = '';
+                    this.style.minHeight = '';
+
+                    const taskId = e.dataTransfer.getData('text/plain');
+                    const newColumn = this.dataset.column;
+
+                    if (taskId && newColumn) {
+                        try {
+                            const task = CRM.getTasks().find(t => t.id === taskId);
+                            if (task && task.column_status !== newColumn) {
+                                await CRM.updateTask(taskId, {
+                                    column_status: newColumn,
+                                    done: newColumn === 'Готово'
+                                });
+                                showToast('Статус: ' + newColumn, 'success');
+                                await CRM.load();
+                                renderTaskKanban();
+                                renderTasks();
+                            }
+                        } catch (err) {
+                            showToast('Ошибка', 'error');
+                        }
+                    }
+                });
+            });
         }
         
         async function loadActivity() {
@@ -560,9 +946,17 @@
             const submitBtn = modal.querySelector('.btn-primary') || this;
             await withButtonLock(submitBtn, async () => {
                 if (!validateForm([{ id: 'newTaskName', required: true, message: 'Введите название' }])) return;
+
+                // Save ALL form values BEFORE showing confirm dialog
                 const name = document.getElementById('newTaskName').value.trim();
                 const projectInput = document.getElementById('newTaskProject');
-                const projectId = projectInput.dataset.selectedId || '';
+                const projectId = (projectInput && projectInput.dataset.selectedId) ? projectInput.dataset.selectedId : '';
+                const person = document.getElementById('newTaskPerson').value;
+                const priority = document.getElementById('newTaskPriority').value;
+                const dateStart = document.getElementById('newTaskDate').value || '';
+                const dateEnd = document.getElementById('newTaskDateEnd').value || '';
+                const time = document.getElementById('newTaskTime').value || '';
+                const description = document.getElementById('newTaskDesc').value.trim();
 
                 // Confirm if no project
                 if (!projectId) {
@@ -570,20 +964,25 @@
                     if (!confirmed) return;
                 }
 
-                await CRM.addTask({
-                    project_id: projectId,
-                    name: name,
-                    column_status: 'Ожидает',
-                    person: document.getElementById('newTaskPerson').value,
-                    date: document.getElementById('newTaskDate').value || '',
-                    date_end: document.getElementById('newTaskDateEnd').value || '',
-                    time: document.getElementById('newTaskTime').value || '',
-                    done: false,
-                    urgent: false,
-                    priority: document.getElementById('newTaskPriority').value,
-                    description: document.getElementById('newTaskDesc').value.trim(),
-                    hashtags: []
-                });
+                try {
+                    await CRM.addTask({
+                        project_id: projectId,
+                        name: name,
+                        column_status: 'Ожидает',
+                        person: person,
+                        date: dateStart,
+                        date_end: dateEnd,
+                        time: time,
+                        done: false,
+                        urgent: false,
+                        priority: priority,
+                        description: description,
+                        hashtags: []
+                    });
+                } catch (err) {
+                    showToast('Ошибка создания: ' + (err.message || 'Неизвестная ошибка'), 'error');
+                    return;
+                }
 
                 closeModal();
                 showToast('Задача создана', 'success');
@@ -624,6 +1023,7 @@
                     input.value = item.dataset.projectName;
                     input.dataset.selectedId = item.dataset.projectId;
                     dropdown.classList.remove('show');
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
                 }
             });
         }
@@ -638,10 +1038,13 @@
         // ===== CONFIRM DIALOG =====
         function showConfirmDialog(message) {
             return new Promise(resolve => {
-                const overlay = document.getElementById('modalOverlay');
+                // Create a floating dialog on top of the existing modal
+                const backdrop = document.createElement('div');
+                backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:600;display:flex;align-items:center;justify-content:center;padding:24px;';
+
                 const dialog = document.createElement('div');
                 dialog.className = 'modal';
-                dialog.style.maxWidth = '380px';
+                dialog.style.cssText = 'max-width:380px;z-index:601;animation:modalIn 0.2s ease;';
                 dialog.onclick = e => e.stopPropagation();
                 dialog.innerHTML = `
                     <div class="modal-body" style="text-align:center;padding:24px;">
@@ -652,19 +1055,20 @@
                         </div>
                     </div>
                 `;
-                // Temporarily show overlay
-                const wasShown = overlay.classList.contains('show');
-                overlay.innerHTML = '';
-                overlay.appendChild(dialog);
-                if (!wasShown) { overlay.classList.add('show'); document.body.style.overflow = 'hidden'; }
+
+                backdrop.appendChild(dialog);
+                document.body.appendChild(backdrop);
 
                 dialog.querySelector('#confirmYes').onclick = () => {
-                    if (!wasShown) { overlay.classList.remove('show'); document.body.style.overflow = ''; }
+                    backdrop.remove();
                     resolve(true);
                 };
                 dialog.querySelector('#confirmNo').onclick = () => {
-                    if (!wasShown) { overlay.classList.remove('show'); document.body.style.overflow = ''; }
+                    backdrop.remove();
                     resolve(false);
+                };
+                backdrop.onclick = (e) => {
+                    if (e.target === backdrop) { backdrop.remove(); resolve(false); }
                 };
             });
         }
@@ -751,47 +1155,54 @@
             }
         };
 
+        // Color presets — shared across modal and window functions
+        const taskPresetColors = [
+            { name: 'blue', hex: '#3B82F6' }, { name: 'yellow', hex: '#F59E0B' },
+            { name: 'green', hex: '#10B981' }, { name: 'gray', hex: '#9CA3AF' },
+            { name: 'red', hex: '#EF4444' }, { name: 'purple', hex: '#8B5CF6' },
+            { name: 'pink', hex: '#EC4899' }, { name: 'orange', hex: '#F97316' },
+            { name: 'teal', hex: '#14B8A6' }, { name: 'indigo', hex: '#6366F1' },
+            { name: 'lime', hex: '#84CC16' }, { name: 'cyan', hex: '#06B6D4' }
+        ];
+        const taskColorHexMap = {};
+        taskPresetColors.forEach(c => taskColorHexMap[c.name] = c.hex);
+        function getTaskColHex(color) { return taskColorHexMap[color] || (color && color.startsWith('#') ? color : '#9CA3AF'); }
+
         // ===== TASK COLUMN CONFIGURATION =====
         window.showTaskColumnConfigModal = async function() {
             await loadTaskColumns();
             const overlay = document.getElementById('modalOverlay');
-            const presetColors = [
-                { name: 'blue', hex: '#3B82F6' }, { name: 'yellow', hex: '#F59E0B' },
-                { name: 'green', hex: '#10B981' }, { name: 'gray', hex: '#9CA3AF' },
-                { name: 'red', hex: '#EF4444' }, { name: 'purple', hex: '#8B5CF6' },
-                { name: 'pink', hex: '#EC4899' }, { name: 'orange', hex: '#F97316' },
-                { name: 'teal', hex: '#14B8A6' }, { name: 'indigo', hex: '#6366F1' },
-                { name: 'lime', hex: '#84CC16' }, { name: 'cyan', hex: '#06B6D4' }
-            ];
-            const colorHexMap = {};
-            presetColors.forEach(c => colorHexMap[c.name] = c.hex);
-            function getColHex(color) { return colorHexMap[color] || color; }
 
             function renderColList() {
-                return taskColumns.map(c => `
+                return taskColumns.map(c => {
+                    const hex = getTaskColHex(c.color);
+                    const swatchesHtml = taskPresetColors.map(cl =>
+                        `<div class="color-swatch${c.color === cl.name ? ' active' : ''}" style="background:${cl.hex};" data-color="${cl.name}" data-col-id="${c.id}" onclick="event.stopPropagation();selectTaskPresetColor(this,${c.id},'${cl.name}')" title="${cl.name}"></div>`
+                    ).join('');
+                    return `
                     <div class="col-config-item" data-col-id="${c.id}" draggable="true">
                         <div class="col-config-handle" title="Перетащить для изменения порядка">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                         </div>
-                        <div class="col-config-dot" style="background:${getColHex(c.color)}"></div>
+                        <div class="col-config-dot" style="background:${hex}"></div>
                         <div class="col-config-name" ondblclick="startRenameTaskColumn(this, ${c.id})" title="Дважды кликните для переименования">${c.name}</div>
                         <div class="color-palette-wrapper">
-                            <button class="color-palette-btn" onclick="toggleTaskColorPalette(this, ${c.id})" title="Изменить цвет" style="background:${getColHex(c.color)};">
+                            <button class="color-palette-btn" onclick="toggleTaskColorPalette(this, ${c.id})" title="Изменить цвет" style="background:${hex};">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.4-.13-.76-.38-1.04-.25-.28-.37-.6-.37-.96 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-5.5-4.5-9.5-10-9.5z"/></svg>
                             </button>
                             <div class="color-palette-dropdown" id="task-palette-${c.id}">
                                 <div class="color-palette-grid">
-                                    ${presetColors.map(cl => `<div class="color-swatch${c.color === cl.name ? ' active' : ''}" style="background:${cl.hex};" data-color="${cl.name}" data-col-id="${c.id}" data-type="task" title="${cl.name}"></div>`).join('')}
+                                    ${swatchesHtml}
                                 </div>
                                 <div class="color-custom-row">
-                                    <input type="color" class="color-custom-input" value="${getColHex(c.color)}" data-col-id="${c.id}" onchange="updateTaskColumnColor(${c.id}, this.value)">
+                                    <input type="color" class="color-custom-input" value="${hex}" data-col-id="${c.id}" onchange="saveTaskCustomColor(${c.id},this.value)">
                                     <span style="font-size:0.75rem;color:var(--gray-500);">Свой цвет</span>
                                 </div>
                             </div>
                         </div>
                         <button class="btn btn-ghost btn-sm" style="color:var(--danger);padding:2px 6px;" onclick="deleteTaskColumn(${c.id})" aria-label="Удалить">✕</button>
-                    </div>
-                `).join('');
+                    </div>`;
+                }).join('');
             }
 
             overlay.innerHTML = `
@@ -820,22 +1231,59 @@
             if (!dropdown) return;
             const isOpen = dropdown.classList.contains('show');
             document.querySelectorAll('.color-palette-dropdown.show').forEach(d => d.classList.remove('show'));
-            if (!isOpen) dropdown.classList.add('show');
+            if (!isOpen) {
+                dropdown.classList.add('show');
+                event.stopPropagation();
+            }
         };
 
-        // Unified click handler for palettes and swatches
+        // Select preset color swatch for tasks — in-place update
+        window.selectTaskPresetColor = async function(swatchEl, colId, color) {
+            const grid = swatchEl.parentElement;
+            grid.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+            swatchEl.classList.add('active');
+            const dropdown = swatchEl.closest('.color-palette-dropdown');
+            if (dropdown) dropdown.classList.remove('show');
+            try {
+                await API.put(`/api/task-columns/${colId}`, { color });
+                await loadTaskColumns();
+                renderTaskFilters();
+                renderTasks();
+                const item = document.querySelector(`.col-config-item[data-col-id="${colId}"]`);
+                if (item) {
+                    const hex = taskPresetColors.find(c => c.name === color)?.hex || color;
+                    const dot = item.querySelector('.col-config-dot');
+                    if (dot) dot.style.background = hex;
+                    const btn = item.querySelector('.color-palette-btn');
+                    if (btn) btn.style.background = hex;
+                    const customInput = item.querySelector('.color-custom-input');
+                    if (customInput) customInput.value = hex;
+                }
+            } catch (err) { showToast('Ошибка', 'error'); }
+        };
+
+        // Save custom color for tasks
+        window.saveTaskCustomColor = async function(colId, hexColor) {
+            try {
+                await API.put(`/api/task-columns/${colId}`, { color: hexColor });
+                await loadTaskColumns();
+                renderTaskFilters();
+                renderTasks();
+                const item = document.querySelector(`.col-config-item[data-col-id="${colId}"]`);
+                if (item) {
+                    const dot = item.querySelector('.col-config-dot');
+                    if (dot) dot.style.background = hexColor;
+                    const btn = item.querySelector('.color-palette-btn');
+                    if (btn) btn.style.background = hexColor;
+                    item.querySelectorAll('.color-swatch').forEach(s => {
+                        s.classList.toggle('active', s.dataset.color === hexColor);
+                    });
+                }
+            } catch (err) { showToast('Ошибка', 'error'); }
+        };
+
+        // Close palettes on outside click
         document.addEventListener('click', function(e) {
-            const swatch = e.target.closest('.color-swatch');
-            if (swatch) {
-                e.stopPropagation();
-                const colId = parseInt(swatch.dataset.colId);
-                const color = swatch.dataset.color;
-                swatch.parentElement.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
-                swatch.classList.add('active');
-                setTimeout(() => { swatch.closest('.color-palette-dropdown').classList.remove('show'); }, 100);
-                updateTaskColumnColor(colId, color);
-                return;
-            }
             if (!e.target.closest('.color-palette-wrapper')) {
                 document.querySelectorAll('.color-palette-dropdown.show').forEach(d => d.classList.remove('show'));
             }
@@ -850,7 +1298,9 @@
                 const newName = input.value.trim() || currentName;
                 try {
                     await API.put(`/api/task-columns/${colId}`, { name: newName });
-                    await loadTaskColumns(); renderTaskFilters(); showTaskColumnConfigModal();
+                    // Reset filter if it was set to the old column name
+                    if (currentFilter === currentName) currentFilter = 'all';
+                    await loadTaskColumns(); renderTaskFilters(); renderTasks(); showTaskColumnConfigModal();
                 } catch (err) { showToast(err.message || 'Ошибка', 'error'); }
             }
             input.addEventListener('blur', save);
@@ -913,8 +1363,7 @@
                 await API.put(`/api/task-columns/${id}`, { color });
                 await loadTaskColumns();
                 renderTaskFilters();
-                const overlay = document.getElementById('modalOverlay');
-                if (overlay && overlay.classList.contains('show')) showTaskColumnConfigModal();
+                renderTasks();
             } catch (err) { showToast('Ошибка', 'error'); }
         };
 

@@ -10,9 +10,9 @@
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=5"></script>
-    <script src="/assets/js/app.js?v=5"></script>
-    <script src="/assets/js/crm-data.js?v=5"></script>
+    <script src="/assets/js/api.js?v=6"></script>
+    <script src="/assets/js/app.js?v=6"></script>
+    <script src="/assets/js/crm-data.js?v=6"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -23,7 +23,6 @@
                 <div style="display:flex;align-items:center;gap:8px;">
                     <h1 class="page-title">Проекты</h1>
                     <button class="btn btn-ghost btn-icon" onclick="showColumnConfigModal()" title="Настройки колонок" aria-label="Настройки колонок" style="width:32px;height:32px;color:var(--gray-400);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
-                    <p class="page-subtitle">Управление заказами</p>
                 </div>
                 <div class="page-actions">
                     <div style="display:flex;gap:4px;">
@@ -454,53 +453,51 @@
             });
         };
 
+        // Color presets — shared across modal and window functions
+        const presetColors = [
+            { name: 'blue', hex: '#3B82F6' }, { name: 'yellow', hex: '#F59E0B' },
+            { name: 'green', hex: '#10B981' }, { name: 'gray', hex: '#9CA3AF' },
+            { name: 'red', hex: '#EF4444' }, { name: 'purple', hex: '#8B5CF6' },
+            { name: 'pink', hex: '#EC4899' }, { name: 'orange', hex: '#F97316' },
+            { name: 'teal', hex: '#14B8A6' }, { name: 'indigo', hex: '#6366F1' },
+            { name: 'lime', hex: '#84CC16' }, { name: 'cyan', hex: '#06B6D4' }
+        ];
+
         // ===== COLUMN CONFIGURATION =====
         window.showColumnConfigModal = async function() {
             await loadColumns();
             const overlay = document.getElementById('modalOverlay');
-            const presetColors = [
-                { name: 'blue', hex: '#3B82F6' }, { name: 'yellow', hex: '#F59E0B' },
-                { name: 'green', hex: '#10B981' }, { name: 'gray', hex: '#9CA3AF' },
-                { name: 'red', hex: '#EF4444' }, { name: 'purple', hex: '#8B5CF6' },
-                { name: 'pink', hex: '#EC4899' }, { name: 'orange', hex: '#F97316' },
-                { name: 'teal', hex: '#14B8A6' }, { name: 'indigo', hex: '#6366F1' },
-                { name: 'lime', hex: '#84CC16' }, { name: 'cyan', hex: '#06B6D4' }
-            ];
-            const colorHexMap = {};
-            presetColors.forEach(c => colorHexMap[c.name] = c.hex);
-
-            function getColHex(color) {
-                return colorHexMap[color] || color;
-            }
-            function isCustomColor(color) {
-                return !colorHexMap[color];
-            }
 
             function renderColList() {
-                return kanbanColumns.map(c => `
+                return kanbanColumns.map(c => {
+                    const hex = getColHex(c.color);
+                    const swatchesHtml = presetColors.map(cl =>
+                        `<div class="color-swatch${c.color === cl.name ? ' active' : ''}" style="background:${cl.hex};" data-color="${cl.name}" data-col-id="${c.id}" onclick="event.stopPropagation();selectPresetColor(this,${c.id},'${cl.name}')" title="${cl.name}"></div>`
+                    ).join('');
+                    return `
                     <div class="col-config-item" data-col-id="${c.id}" draggable="true">
                         <div class="col-config-handle" title="Перетащить для изменения порядка">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                         </div>
-                        <div class="col-config-dot" style="background:${getColHex(c.color)}"></div>
+                        <div class="col-config-dot" style="background:${hex}"></div>
                         <div class="col-config-name" ondblclick="startRenameColumn(this, ${c.id})" title="Дважды кликните для переименования">${c.name}</div>
                         <div class="color-palette-wrapper">
-                            <button class="color-palette-btn" onclick="toggleColorPalette(this, ${c.id})" title="Изменить цвет" style="background:${getColHex(c.color)};">
+                            <button class="color-palette-btn" onclick="toggleColorPalette(this, ${c.id})" title="Изменить цвет" style="background:${hex};">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.4-.13-.76-.38-1.04-.25-.28-.37-.6-.37-.96 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-5.5-4.5-9.5-10-9.5z"/></svg>
                             </button>
                             <div class="color-palette-dropdown" id="palette-${c.id}">
                                 <div class="color-palette-grid">
-                                    ${presetColors.map(cl => `<div class="color-swatch${c.color === cl.name ? ' active' : ''}" style="background:${cl.hex};" data-color="${cl.name}" data-col-id="${c.id}" title="${cl.name}"></div>`).join('')}
+                                    ${swatchesHtml}
                                 </div>
                                 <div class="color-custom-row">
-                                    <input type="color" class="color-custom-input" value="${getColHex(c.color)}" data-col-id="${c.id}" onchange="updateColumnColor(${c.id}, this.value)">
+                                    <input type="color" class="color-custom-input" value="${hex}" data-col-id="${c.id}" onchange="saveCustomColor(${c.id},this.value)">
                                     <span style="font-size:0.75rem;color:var(--gray-500);">Свой цвет</span>
                                 </div>
                             </div>
                         </div>
                         <button class="btn btn-ghost btn-sm" style="color:var(--danger);padding:2px 6px;" onclick="deleteColumn(${c.id})" aria-label="Удалить">✕</button>
-                    </div>
-                `).join('');
+                    </div>`;
+                }).join('');
             }
 
             overlay.innerHTML = `
@@ -529,26 +526,65 @@
             if (!dropdown) return;
             const isOpen = dropdown.classList.contains('show');
             document.querySelectorAll('.color-palette-dropdown.show').forEach(d => d.classList.remove('show'));
-            if (!isOpen) dropdown.classList.add('show');
+            if (!isOpen) {
+                dropdown.classList.add('show');
+                event.stopPropagation();
+            }
         };
 
-        // Unified click handler for palettes and swatches
+        // Select preset color swatch — update in-place, NO modal re-render
+        window.selectPresetColor = async function(swatchEl, colId, color) {
+            const grid = swatchEl.parentElement;
+            grid.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+            swatchEl.classList.add('active');
+            // Close dropdown
+            const dropdown = swatchEl.closest('.color-palette-dropdown');
+            if (dropdown) dropdown.classList.remove('show');
+            // Update API + views
+            try {
+                await API.put(`/api/kanban-columns/${colId}`, { color });
+                await loadColumns();
+                renderStatusFilters();
+                renderProjects();
+                // Update color in-place inside the modal
+                const item = document.querySelector(`.col-config-item[data-col-id="${colId}"]`);
+                if (item) {
+                    const hex = presetColors.find(c => c.name === color)?.hex || color;
+                    const dot = item.querySelector('.col-config-dot');
+                    if (dot) dot.style.background = hex;
+                    const btn = item.querySelector('.color-palette-btn');
+                    if (btn) btn.style.background = hex;
+                    // Update custom color input value
+                    const customInput = item.querySelector('.color-custom-input');
+                    if (customInput) customInput.value = hex;
+                }
+            } catch (err) { showToast('Ошибка', 'error'); }
+        };
+
+        // Save custom color — only fires on picker close (onchange), NOT oninput
+        window.saveCustomColor = async function(colId, hexColor) {
+            try {
+                await API.put(`/api/kanban-columns/${colId}`, { color: hexColor });
+                await loadColumns();
+                renderStatusFilters();
+                renderProjects();
+                // Update in-place
+                const item = document.querySelector(`.col-config-item[data-col-id="${colId}"]`);
+                if (item) {
+                    const dot = item.querySelector('.col-config-dot');
+                    if (dot) dot.style.background = hexColor;
+                    const btn = item.querySelector('.color-palette-btn');
+                    if (btn) btn.style.background = hexColor;
+                    // Update swatch active states
+                    item.querySelectorAll('.color-swatch').forEach(s => {
+                        s.classList.toggle('active', s.dataset.color === hexColor);
+                    });
+                }
+            } catch (err) { showToast('Ошибка', 'error'); }
+        };
+
+        // Close palettes on outside click
         document.addEventListener('click', function(e) {
-            // Swatch click
-            const swatch = e.target.closest('.color-swatch');
-            if (swatch) {
-                e.stopPropagation();
-                const colId = parseInt(swatch.dataset.colId);
-                const color = swatch.dataset.color;
-                const isTask = swatch.dataset.type === 'task';
-                swatch.parentElement.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
-                swatch.classList.add('active');
-                setTimeout(() => { swatch.closest('.color-palette-dropdown').classList.remove('show'); }, 100);
-                if (isTask) updateTaskColumnColor(colId, color);
-                else updateColumnColor(colId, color);
-                return;
-            }
-            // Close palettes on outside click
             if (!e.target.closest('.color-palette-wrapper')) {
                 document.querySelectorAll('.color-palette-dropdown.show').forEach(d => d.classList.remove('show'));
             }
@@ -671,11 +707,6 @@
                 await loadColumns();
                 renderStatusFilters();
                 renderProjects();
-                // Refresh modal if open
-                const overlay = document.getElementById('modalOverlay');
-                if (overlay && overlay.classList.contains('show')) {
-                    showColumnConfigModal();
-                }
             } catch (err) {
                 showToast('Ошибка', 'error');
             }

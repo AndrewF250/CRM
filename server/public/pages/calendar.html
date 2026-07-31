@@ -9,9 +9,9 @@
 <body>
     <div id="app"></div>
 
-    <script src="/assets/js/api.js?v=3"></script>
-    <script src="/assets/js/app.js?v=3"></script>
-    <script src="/assets/js/crm-data.js?v=3"></script>
+    <script src="/assets/js/api.js?v=8"></script>
+    <script src="/assets/js/app.js?v=8"></script>
+    <script src="/assets/js/crm-data.js?v=8"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -117,15 +117,21 @@
                 // Find tasks for this day
                 const dayStr = d < 10 ? '0' + d : '' + d;
                 const monthStr = (calMonth + 1) < 10 ? '0' + (calMonth + 1) : '' + (calMonth + 1);
+                const isoDate = calYear + '-' + monthStr + '-' + dayStr;
                 
                 const dayTasks = tasks.filter(t => {
                     if (!t.date) return false;
-                    // Check various date formats
                     const date = t.date.trim();
+                    // ISO format: 2026-07-30
+                    if (date === isoDate) return true;
+                    // Range check: task spans multiple days
+                    if (t.date_end && t.date_end.trim()) {
+                        if (date <= isoDate && t.date_end.trim() >= isoDate) return true;
+                    }
+                    // Legacy formats
                     if (date.includes(dayStr + '.' + monthStr)) return true;
                     if (date.includes(dayStr + '/' + monthStr)) return true;
-                    if (isToday && date === 'Сегодня') return true;
-                    if (isToday && date.toLowerCase() === 'сегодня') return true;
+                    if (isToday && (date === 'Сегодня' || date.toLowerCase() === 'сегодня')) return true;
                     return false;
                 });
                 

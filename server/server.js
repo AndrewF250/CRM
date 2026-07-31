@@ -215,7 +215,15 @@ app.put('/api/projects/:id', requireAuth, (req, res) => {
 
 app.delete('/api/projects/:id', requireAuth, (req, res) => {
   try {
-    db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+    const projectId = req.params.id;
+    // Cascade delete: subtasks → tasks → documents → calls → activity → reminders
+    db.prepare('DELETE FROM subtasks WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)').run(projectId);
+    db.prepare('DELETE FROM tasks WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM documents WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM calls WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM activity WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM reminders WHERE project_id = ?').run(projectId);
+    db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -244,9 +252,9 @@ app.get('/api/tasks', requireAuth, (req, res) => {
     const { project_id } = req.query;
     let tasks;
     if (project_id) {
-      tasks = db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at').all(project_id);
+      tasks = db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC').all(project_id);
     } else {
-      tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at').all();
+      tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all();
     }
     res.json(tasks.map(t => ({
       ...t,

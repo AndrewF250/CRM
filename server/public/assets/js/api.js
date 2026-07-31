@@ -79,13 +79,16 @@ const API = {
         LoadingBar.show();
         try {
             const response = await fetch(url, config);
-            if (response.status === 401) {
+            // 401 on /login means wrong credentials — let it fall through to the
+            // error handler below instead of redirecting (which cleared the form silently)
+            if (response.status === 401 && endpoint !== '/login') {
                 this.clearToken();
                 window.location.href = '/pages/login.html';
                 return null;
             }
             if (!response.ok) {
-                const error = await response.json();
+                let error;
+                try { error = await response.json(); } catch { error = { error: 'Ошибка сервера (' + response.status + ')' }; }
                 throw new Error(error.error || 'Request failed');
             }
             return await response.json();
