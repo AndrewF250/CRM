@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Настройки — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=8">
+    <link rel="stylesheet" href="/assets/css/style.css?v=16">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=8"></script>
-    <script src="/assets/js/app.js?v=8"></script>
+    <script src="/assets/js/api.js?v=11"></script>
+    <script src="/assets/js/app.js?v=16"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -127,16 +127,17 @@
             <!-- КОМАНДА -->
             <div class="tab-content" id="tabTeam">
                 <div class="card">
-                    <div class="card-header"><h3 class="card-title">Команда</h3></div>
+                    <div class="card-header">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <h3 class="card-title">Команда</h3>
+                            <button class="btn btn-ghost btn-sm" onclick="showNewUserModal()" title="Добавить пользователя" aria-label="Добавить пользователя" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</button>
+                        </div>
+                    </div>
                     <div class="card-body">
                         <div class="table-wrapper">
                             <table class="table">
-                                <thead><tr><th>Пользователь</th><th>Логин</th><th>Роль</th></tr></thead>
-                                <tbody>
-                                    <tr><td><div style="display:flex;align-items:center;gap:10px;"><div class="user-avatar" style="width:30px;height:30px;font-size:0.65rem;">КИ</div><span class="table-cell-name">Костя</span></div></td><td>Костя</td><td><span class="badge badge-primary">Админ</span></td></tr>
-                                    <tr><td><div style="display:flex;align-items:center;gap:10px;"><div class="user-avatar" style="width:30px;height:30px;font-size:0.65rem;background:var(--success);">МИ</div><span class="table-cell-name">Максим</span></div></td><td>Максим</td><td><span class="badge badge-primary">Админ</span></td></tr>
-                                    <tr><td><div style="display:flex;align-items:center;gap:10px;"><div class="user-avatar" style="width:30px;height:30px;font-size:0.65rem;background:var(--warning);">АН</div><span class="table-cell-name">Андрей</span></div></td><td>Андрей</td><td><span class="badge badge-primary">Админ</span></td></tr>
-                                </tbody>
+                                <thead><tr><th>Пользователь</th><th>Логин</th><th>Роль</th><th></th></tr></thead>
+                                <tbody id="teamTableBody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -217,6 +218,95 @@
             document.getElementById('confirmPassword').value = '';
             showToast('Пароль изменён', 'success');
         };
+
+        // ===== TEAM =====
+        const roleLabel = { admin: 'Админ', manager: 'Менеджер' };
+        const avatarColors = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--info)', 'var(--danger)'];
+
+        async function loadTeam() {
+            const tbody = document.getElementById('teamTableBody');
+            try {
+                const users = await API.get('/users') || [];
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:20px;">Нет пользователей</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = users.map((u, i) => {
+                    const canDelete = user?.role === 'admin' && u.id !== user.id;
+                    return `<tr>
+                        <td><div style="display:flex;align-items:center;gap:10px;">
+                            <div class="user-avatar" style="width:30px;height:30px;font-size:0.65rem;background:${avatarColors[i % avatarColors.length]};">${u.avatar || '?'}</div>
+                            <span class="table-cell-name">${u.name}</span>
+                        </div></td>
+                        <td>${u.username}</td>
+                        <td><span class="badge ${u.role === 'admin' ? 'badge-primary' : 'badge-gray'}">${roleLabel[u.role] || u.role}</span></td>
+                        <td style="text-align:right;">${canDelete ? '<button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteUser(' + u.id + ', \'' + u.name.replace(/'/g, "\\'") + '\')" title="Удалить">✕</button>' : ''}</td>
+                    </tr>`;
+                }).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-muted">Ошибка загрузки</td></tr>';
+            }
+        }
+
+        window.showNewUserModal = function() {
+            if (user?.role !== 'admin') { showToast('Только админ может добавлять пользователей', 'error'); return; }
+            const overlay = document.getElementById('modalOverlay');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3 class="modal-title">Новый пользователь</h3>
+                        <button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group"><label class="form-label">Имя *</label><input type="text" class="form-input" id="newUserName" placeholder="Как отображать в системе"></div>
+                        <div class="form-group"><label class="form-label">Логин *</label><input type="text" class="form-input" id="newUserLogin" placeholder="Для входа"></div>
+                        <div class="form-group"><label class="form-label">Пароль *</label><input type="password" class="form-input" id="newUserPassword" placeholder="Минимум 4 символа"></div>
+                        <div class="form-group"><label class="form-label">Роль</label>
+                            <select class="form-select" id="newUserRole">
+                                <option value="manager">Менеджер</option>
+                                <option value="admin">Администратор</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+                        <button class="btn btn-primary" onclick="createUser()">Создать</button>
+                    </div>
+                </div>
+            `;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        };
+
+        window.createUser = async function() {
+            const name = document.getElementById('newUserName').value.trim();
+            const username = document.getElementById('newUserLogin').value.trim();
+            const password = document.getElementById('newUserPassword').value;
+            const role = document.getElementById('newUserRole').value;
+            if (!name || !username || !password) { showToast('Заполните все поля', 'error'); return; }
+            try {
+                await API.post('/users', { name, username, password, role });
+                closeModal();
+                showToast('Пользователь создан', 'success');
+                await loadTeam();
+            } catch (err) {
+                showToast(err.message || 'Ошибка', 'error');
+            }
+        };
+
+        window.deleteUser = function(id, name) {
+            confirmDelete('Удалить пользователя «' + name + '»?', async () => {
+                try {
+                    await API.delete('/users/' + id);
+                    showToast('Пользователь удалён', 'success');
+                    await loadTeam();
+                } catch (err) {
+                    showToast(err.message || 'Ошибка', 'error');
+                }
+            });
+        };
+
+        await loadTeam();
     })();
     </script>
 </body>

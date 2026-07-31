@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дашборд — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/style.css?v=20">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=8"></script>
-    <script src="/assets/js/app.js?v=8"></script>
-    <script src="/assets/js/crm-data.js?v=8"></script>
+    <script src="/assets/js/api.js?v=16"></script>
+    <script src="/assets/js/app.js?v=21"></script>
+    <script src="/assets/js/crm-data.js?v=16"></script>
     <script>
     function formatDate(dateStr) {
         if (!dateStr) return '—';
@@ -44,20 +44,33 @@
         app.innerHTML = renderSidebar('dashboard') + renderHeader() + `
             <div class="page-header">
                 <div><h1 class="page-title">Добрый день, ${user ? user.name : 'Админ'}</h1><p class="page-subtitle" id="currentDate"></p></div>
-                <div class="page-actions">
-                    <button class="btn btn-secondary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Быстрая задача</button>
-                </div>
             </div>
             <div class="stats-grid" id="statsGrid"></div>
             <div class="grid-2">
                 <div class="card">
-                    <div class="card-header"><h3 class="card-title">Задачи</h3><a href="/pages/tasks.html" class="btn btn-ghost btn-sm">Все</a></div>
+                    <div class="card-header">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <h3 class="card-title">Мои задачи</h3>
+                            <button class="btn btn-ghost btn-sm" onclick="showNewTaskModal()" title="Создать задачу" aria-label="Создать задачу" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</button>
+                        </div>
+                        <a href="/pages/tasks.html" class="btn btn-ghost btn-sm">Все</a>
+                    </div>
                     <div class="card-body" style="padding:12px;" id="todayTasks"></div>
                 </div>
                 <div class="card">
                     <div class="card-header"><h3 class="card-title">Проекты</h3><a href="/pages/projects.html" class="btn btn-ghost btn-sm">Все</a></div>
                     <div class="card-body" style="padding:0;" id="recentProjects"></div>
                 </div>
+            </div>
+            <div class="card" style="margin-top:16px;">
+                <div class="card-header">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <h3 class="card-title">Цели</h3>
+                        <a href="/pages/goals.html" class="btn btn-ghost btn-sm" title="Создать цель" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</a>
+                    </div>
+                    <a href="/pages/goals.html" class="btn btn-ghost btn-sm">Все</a>
+                </div>
+                <div class="card-body" style="padding:12px;" id="dashboardGoals"></div>
             </div>
             <div class="card" style="margin-top:16px;" id="remindersCard">
                 <div class="card-header"><h3 class="card-title">Напоминания об оплате</h3></div>
@@ -71,6 +84,7 @@
         const now = new Date();
         document.getElementById('currentDate').textContent = 'Сегодня, ' + now.toLocaleDateString('ru-RU');
         
+        async function loadDashboardData() {
         await CRM.load();
         const stats = await API.getStats();
         
@@ -82,29 +96,34 @@
             <div class="stat-card"><div class="stat-icon purple"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="stat-info"><div class="stat-label">Клиенты</div><div class="stat-value">${stats.totalClients || 0}</div></div></div>
         `;
         
-        // Render tasks
-        const tasks = CRM.getTasks().filter(t => !t.done).slice(0, 5);
+        // Render tasks of the current user only — detailed cards like on the tasks page
+        const tasks = CRM.getTasks().filter(t => !t.done && user && t.person === user.name).slice(0, 5);
         if (tasks.length === 0) {
             document.getElementById('todayTasks').innerHTML = '<p class="text-muted" style="text-align:center;padding:20px;">Нет активных задач</p>';
         } else {
-            document.getElementById('todayTasks').innerHTML = '<div class="task-list">' + tasks.map(t => {
+            const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
+            const priorityLabel = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
+            document.getElementById('todayTasks').innerHTML = tasks.map(t => {
                 const project = CRM.getProject(t.project_id);
-                return `<div class="task-item">
-                    <input type="checkbox" class="task-checkbox" data-task-id="${t.id}">
-                    <div class="task-info">
-                        <div class="task-name">${t.name}</div>
-                        <div class="task-meta"><span class="task-project">${project ? project.name : ''}</span><span>${t.person}</span><span class="task-time">${t.time || ''}</span></div>
+                const isPaused = t.column_status === 'Простой';
+                const dateRange = t.date && t.date_end && t.date !== t.date_end
+                    ? formatDate(t.date) + ' — ' + formatDate(t.date_end)
+                    : formatDate(t.date) !== '—' ? formatDate(t.date) : '';
+                return `<div class="task-card${isPaused ? ' paused' : ''}" style="cursor:pointer;" onclick="location.href='/pages/task.html?id=${t.id}'">
+                    <div style="flex:1;min-width:0;">
+                        <div class="task-name" style="font-weight:600;font-size:0.95rem;">${t.name}</div>
+                        ${t.description ? '<div style="font-size:0.82rem;color:var(--gray-500);margin-top:3px;line-height:1.4;white-space:pre-wrap;">' + t.description + '</div>' : ''}
+                        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:0.8rem;color:var(--gray-500);flex-wrap:wrap;">
+                            ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" onclick="event.stopPropagation()" style="color:var(--primary);text-decoration:none;">' + project.name + '</a><span>·</span>' : ''}
+                            <span>${t.person}</span>
+                            ${dateRange ? '<span>·</span><span>' + dateRange + (t.time ? ' ' + t.time : '') + '</span>' : (t.time ? '<span>·</span><span>' + t.time + '</span>' : '')}
+                            <span title="${priorityLabel[t.priority] || 'Средний'}">${priorityEmoji[t.priority] || '🟡'}</span>
+                            ${t.column_status ? '<span class="badge badge-gray" style="font-size:0.65rem;">' + t.column_status + '</span>' : ''}
+                            ${isPaused ? '<span class="badge badge-warning" style="font-size:0.65rem;">ПРОСТОЙ</span>' : ''}
+                        </div>
                     </div>
                 </div>`;
-            }).join('') + '</div>';
-            
-            document.querySelectorAll('.task-checkbox').forEach(cb => {
-                cb.addEventListener('change', async () => {
-                    await CRM.updateTask(cb.dataset.taskId, { done: cb.checked, column_status: cb.checked ? 'Готово' : 'В работе' });
-                    showToast(cb.checked ? 'Выполнено' : 'В работе', 'success');
-                    setTimeout(() => location.reload(), 500);
-                });
-            });
+            }).join('');
         }
         
         // Render projects
@@ -121,6 +140,45 @@
                 '</tbody></table></div>';
         }
         
+        // Render goals (active, with countdown)
+        try {
+            const allGoals = await API.get('/goals') || [];
+            const activeGoals = allGoals.filter(g => g.status !== 'done').slice(0, 4);
+            const goalsEl = document.getElementById('dashboardGoals');
+            if (activeGoals.length === 0) {
+                goalsEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:16px;">Нет активных целей · <a href="/pages/goals.html">создать</a></p>';
+            } else {
+                goalsEl.innerHTML = activeGoals.map(g => {
+                    let cdText = 'Без срока', cdCls = '';
+                    if (g.date_end) {
+                        const end = new Date(g.date_end + 'T23:59:59');
+                        const diff = end - new Date();
+                        if (diff <= 0) { cdText = 'Просрочено'; cdCls = 'overdue'; }
+                        else {
+                            const days = Math.floor(diff / 86400000);
+                            const hours = Math.floor((diff % 86400000) / 3600000);
+                            cdText = days > 0 ? days + 'д ' + hours + 'ч' : hours + 'ч';
+                            cdCls = days < 3 ? 'urgent' : 'ok';
+                        }
+                    }
+                    const assignees = (g.assignees || []).slice(0, 3).map(a => '<span class="goal-assignee-chip">' + a + '</span>').join('');
+                    const progress = Math.min(100, Math.max(0, g.progress || 0));
+                    return `<div class="goal-card" style="margin-bottom:8px;padding:12px;cursor:pointer;" onclick="location.href='/pages/goals.html?goal=${g.id}'">
+                        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:600;font-size:0.95rem;">${g.name}</div>
+                                <div class="goal-assignees" style="margin-top:6px;">${assignees}</div>
+                                <div class="goal-progress-bar"><span style="width:${progress}%"></span></div>
+                            </div>
+                            <div class="goal-countdown ${cdCls}">${cdText}</div>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+        } catch (err) {
+            document.getElementById('dashboardGoals').innerHTML = '<p class="text-muted" style="text-align:center;padding:16px;">Не удалось загрузить цели</p>';
+        }
+
         // Render reminders
         try {
             const reminders = await API.get('/api/reminders?active=true');
@@ -146,6 +204,10 @@
         } catch (err) {
             document.getElementById('remindersCard').style.display = 'none';
         }
+        }
+        
+        await loadDashboardData();
+        window.refreshPageData = loadDashboardData;
         
         // New Task Modal
         window.showNewTaskModal = function() {
@@ -163,7 +225,7 @@
                         <div class="form-group"><label class="form-label" for="newTaskName">Название</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
                             <div class="form-group"><label class="form-label" for="newTaskProject">Проект</label><select class="form-select" id="newTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
-                            <div class="form-group"><label class="form-label" for="newTaskPerson">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPerson">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()">${['Костя', 'Максим', 'Андрей'].map(p => `<option${user && user.name === p ? ' selected' : ''}>${p}</option>`).join('')}</select></div>
                         </div>
                         <div class="form-row">
                             <div class="form-group"><label class="form-label" for="newTaskDate">Дата</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>

@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Календарь — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/style.css?v=16">
 </head>
 <body>
     <div id="app"></div>
 
-    <script src="/assets/js/api.js?v=8"></script>
-    <script src="/assets/js/app.js?v=8"></script>
-    <script src="/assets/js/crm-data.js?v=8"></script>
+    <script src="/assets/js/api.js?v=11"></script>
+    <script src="/assets/js/app.js?v=16"></script>
+    <script src="/assets/js/crm-data.js?v=11"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -19,7 +19,7 @@
         const app = document.getElementById('app');
         app.innerHTML = renderSidebar('calendar') + renderHeader() + `
             <div class="page-header">
-                <div><h1 class="page-title">Календарь</h1><p class="page-subtitle">Задачи и дедлайны</p></div>
+                <div><h1 class="page-title">Календарь</h1><p class="page-subtitle">Задачи, цели и дедлайны</p></div>
                 <div class="page-actions">
                     <div class="cal-nav">
                         <button class="btn btn-secondary btn-sm" onclick="calPrev()" aria-label="Предыдущий месяц"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg></button>
@@ -29,14 +29,11 @@
                     <button class="btn btn-secondary btn-sm" onclick="calToday()">Сегодня</button>
                 </div>
             </div>
-            <div class="filter-bar" style="margin-bottom:16px;">
+            <div class="filter-bar" style="margin-bottom:16px;" id="calPersonFilters">
                 <span class="text-sm text-muted" style="margin-right:4px;">Ответственный:</span>
-                <button class="filter-chip active" onclick="filterPerson('all', this)">Все</button>
-                <button class="filter-chip" onclick="filterPerson('Костя', this)">Костя</button>
-                <button class="filter-chip" onclick="filterPerson('Максим', this)">Максим</button>
-                <button class="filter-chip" onclick="filterPerson('Андрей', this)">Андрей</button>
+                <button class="filter-chip active cal-filter-person" onclick="filterPerson('all', this)">Все</button>
             </div>
-            <div class="card">
+            <div class="card" style="overflow:hidden;">
                 <div class="cal-grid" id="calGrid">
                     <div class="cal-day-header">Пн</div>
                     <div class="cal-day-header">Вт</div>
@@ -51,6 +48,7 @@
                 <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--danger);"></span> Просрочено</div>
                 <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--success);"></span> В работе</div>
                 <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--warning);"></span> Ожидает</div>
+                <div class="cal-legend-item"><span class="cal-legend-dot" style="background:#0EA5E9;"></span> Цель</div>
                 <div class="cal-legend-item"><span class="cal-legend-dot" style="background:var(--gray-400);"></span> Выполнено</div>
             </div>
             </div></div></div>
@@ -58,6 +56,21 @@
         
         initCommonUI();
         await CRM.load();
+
+        let teamUsers = [];
+        let goals = [];
+        try { teamUsers = await API.get('/users') || []; } catch (e) { teamUsers = []; }
+        try { goals = await API.get('/goals') || []; } catch (e) { goals = []; }
+
+        // Build person filter chips from users
+        const filterBar = document.getElementById('calPersonFilters');
+        teamUsers.forEach(u => {
+            const btn = document.createElement('button');
+            btn.className = 'filter-chip cal-filter-person';
+            btn.textContent = u.name;
+            btn.onclick = function() { filterPerson(u.name, this); };
+            filterBar.appendChild(btn);
+        });
         
         const now = new Date();
         let calYear = now.getFullYear();
@@ -65,6 +78,23 @@
         let filterPersonValue = 'all';
         
         const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+        function toISO(y, m, d) {
+            const mm = (m + 1) < 10 ? '0' + (m + 1) : '' + (m + 1);
+            const dd = d < 10 ? '0' + d : '' + d;
+            return y + '-' + mm + '-' + dd;
+        }
+
+        function parseISO(s) {
+            if (!s) return null;
+            const p = s.trim().split('-');
+            if (p.length !== 3) return null;
+            return new Date(+p[0], +p[1] - 1, +p[2]);
+        }
+
+        function daysBetween(a, b) {
+            return Math.round((b - a) / 86400000);
+        }
         
         window.calPrev = function() { calMonth--; if(calMonth<0){calMonth=11;calYear--; } render(); };
         window.calNext = function() { calMonth++; if(calMonth>11){calMonth=0;calYear++; } render(); };
@@ -72,112 +102,214 @@
         
         window.filterPerson = function(person, btn) {
             filterPersonValue = person;
-            document.querySelectorAll('.filter-bar .filter-chip').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.cal-filter-person').forEach(c => c.classList.remove('active'));
             btn.classList.add('active');
             render();
         };
+
+        function eventColorClass(ev) {
+            if (ev.type === 'goal') return 'cal-bar-goal';
+            if (ev.done) return 'cal-bar-gray';
+            if (ev.urgent) return 'cal-bar-danger';
+            if (ev.status === 'В работе') return 'cal-bar-success';
+            if (ev.status === 'Согласуем' || ev.status === 'Согласование') return 'cal-bar-warning';
+            return 'cal-bar-info';
+        }
+
+        function collectEvents() {
+            const events = [];
+            // Tasks
+            CRM.getTasks().forEach(t => {
+                if (!t.date) return;
+                if (filterPersonValue !== 'all' && t.person !== filterPersonValue) return;
+                const start = t.date.trim();
+                const end = (t.date_end && t.date_end.trim()) ? t.date_end.trim() : start;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return;
+                events.push({
+                    id: t.id,
+                    type: 'task',
+                    name: t.name,
+                    start, end,
+                    person: t.person,
+                    done: !!t.done,
+                    urgent: !!t.urgent,
+                    status: t.column_status,
+                    time: t.time || '',
+                    project_id: t.project_id,
+                    href: t.project_id ? '/pages/project.html?id=' + t.project_id : '/pages/tasks.html?task=' + t.id
+                });
+            });
+            // Goals
+            goals.forEach(g => {
+                if (!g.date_start && !g.date_end) return;
+                const start = (g.date_start || g.date_end || '').trim();
+                const end = (g.date_end || g.date_start || '').trim();
+                if (!start) return;
+                const assignees = g.assignees || [];
+                if (filterPersonValue !== 'all' && !assignees.includes(filterPersonValue)) return;
+                events.push({
+                    id: g.id,
+                    type: 'goal',
+                    name: g.name,
+                    start, end,
+                    person: assignees.join(', '),
+                    done: g.status === 'done',
+                    urgent: false,
+                    status: g.status,
+                    time: '',
+                    href: '/pages/goals.html?goal=' + g.id
+                });
+            });
+            return events;
+        }
         
         function render() {
             document.getElementById('calMonthLabel').textContent = MONTHS[calMonth] + ' ' + calYear;
             const grid = document.getElementById('calGrid');
-            const headers = grid.querySelectorAll('.cal-day-header');
+            // Keep headers
+            const headers = [...grid.querySelectorAll('.cal-day-header')];
             grid.innerHTML = '';
             headers.forEach(h => grid.appendChild(h));
-            
-            const tasks = CRM.getTasks().filter(t => {
-                if (filterPersonValue === 'all') return true;
-                return t.person === filterPersonValue;
-            });
-            
+
             const firstDay = new Date(calYear, calMonth, 1).getDay();
             const firstDayAdj = firstDay === 0 ? 6 : firstDay - 1;
             const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-            
-            for (let i = 0; i < firstDayAdj; i++) {
-                const empty = document.createElement('div');
-                empty.className = 'cal-day cal-day-empty';
-                grid.appendChild(empty);
-            }
-            
-            for (let d = 1; d <= daysInMonth; d++) {
-                const cell = document.createElement('div');
-                cell.className = 'cal-day';
-                const isToday = d === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear();
-                const dayOfWeek = new Date(calYear, calMonth, d).getDay();
-                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                
-                if (isToday) cell.classList.add('cal-today');
-                if (isWeekend) cell.classList.add('cal-weekend');
-                
-                const num = document.createElement('div');
-                num.className = 'cal-day-num' + (isToday ? ' cal-today-num' : '');
-                num.textContent = d;
-                cell.appendChild(num);
-                
-                // Find tasks for this day
-                const dayStr = d < 10 ? '0' + d : '' + d;
-                const monthStr = (calMonth + 1) < 10 ? '0' + (calMonth + 1) : '' + (calMonth + 1);
-                const isoDate = calYear + '-' + monthStr + '-' + dayStr;
-                
-                const dayTasks = tasks.filter(t => {
-                    if (!t.date) return false;
-                    const date = t.date.trim();
-                    // ISO format: 2026-07-30
-                    if (date === isoDate) return true;
-                    // Range check: task spans multiple days
-                    if (t.date_end && t.date_end.trim()) {
-                        if (date <= isoDate && t.date_end.trim() >= isoDate) return true;
-                    }
-                    // Legacy formats
-                    if (date.includes(dayStr + '.' + monthStr)) return true;
-                    if (date.includes(dayStr + '/' + monthStr)) return true;
-                    if (isToday && (date === 'Сегодня' || date.toLowerCase() === 'сегодня')) return true;
-                    return false;
-                });
-                
-                dayTasks.forEach(t => {
-                    const project = CRM.getProject(t.project_id);
-                    const el = document.createElement('div');
-                    el.className = 'cal-event';
-                    
-                    if (t.done) {
-                        el.classList.add('cal-event-gray', 'cal-event-done');
-                    } else if (t.urgent) {
-                        el.classList.add('cal-event-danger');
-                    } else if (t.column_status === 'В работе') {
-                        el.classList.add('cal-event-success');
-                    } else if (t.column_status === 'Согласуем') {
-                        el.classList.add('cal-event-warning');
-                    } else {
-                        el.classList.add('cal-event-info');
-                    }
-                    
-                    el.textContent = (t.time ? t.time + ' ' : '') + t.name;
-                    el.title = t.name + (project ? ' — ' + project.name : '') + ' (' + t.person + ')';
-                    el.style.cursor = 'pointer';
-                    el.onclick = function() {
-                        if (project) {
-                            window.location.href = '/pages/project.html?id=' + t.project_id;
-                        }
-                    };
-                    cell.appendChild(el);
-                });
-                
-                grid.appendChild(cell);
-            }
-            
-            const totalCells = firstDayAdj + daysInMonth;
-            const remainder = totalCells % 7;
-            if (remainder > 0) {
-                for (let j = 0; j < 7 - remainder; j++) {
-                    const empty = document.createElement('div');
-                    empty.className = 'cal-day cal-day-empty';
-                    grid.appendChild(empty);
+            const totalCells = Math.ceil((firstDayAdj + daysInMonth) / 7) * 7;
+
+            // Build flat day list for the grid
+            const days = [];
+            for (let i = 0; i < totalCells; i++) {
+                const dayNum = i - firstDayAdj + 1;
+                if (dayNum < 1 || dayNum > daysInMonth) {
+                    days.push({ empty: true, date: null, col: i % 7 });
+                } else {
+                    days.push({
+                        empty: false,
+                        day: dayNum,
+                        date: toISO(calYear, calMonth, dayNum),
+                        col: i % 7,
+                        isToday: dayNum === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear(),
+                        isWeekend: new Date(calYear, calMonth, dayNum).getDay() === 0 || new Date(calYear, calMonth, dayNum).getDay() === 6
+                    });
                 }
+            }
+
+            const events = collectEvents();
+            const BAR_H = 20;
+            const BAR_GAP = 2;
+            const TOP_PAD = 28;
+
+            // Render week by week
+            for (let w = 0; w < days.length / 7; w++) {
+                const weekDays = days.slice(w * 7, w * 7 + 7);
+                const weekEl = document.createElement('div');
+                weekEl.className = 'cal-week';
+
+                // Day cells
+                weekDays.forEach(d => {
+                    const cell = document.createElement('div');
+                    cell.className = 'cal-day' + (d.empty ? ' cal-day-empty' : '') + (d.isToday ? ' cal-today' : '') + (d.isWeekend ? ' cal-weekend' : '');
+                    if (!d.empty) {
+                        const num = document.createElement('div');
+                        num.className = 'cal-day-num' + (d.isToday ? ' cal-today-num' : '');
+                        num.textContent = d.day;
+                        cell.appendChild(num);
+                    }
+                    weekEl.appendChild(cell);
+                });
+
+                // Events layer
+                const layer = document.createElement('div');
+                layer.className = 'cal-week-events';
+
+                const weekStartISO = weekDays.find(d => d.date)?.date;
+                const weekEndISO = [...weekDays].reverse().find(d => d.date)?.date;
+                if (!weekStartISO) {
+                    grid.appendChild(weekEl);
+                    continue;
+                }
+
+                // Events overlapping this week
+                const weekEvents = [];
+                events.forEach(ev => {
+                    const evStart = parseISO(ev.start);
+                    const evEnd = parseISO(ev.end) || evStart;
+                    if (!evStart) return;
+                    const wStart = parseISO(weekStartISO);
+                    const wEnd = parseISO(weekEndISO) || wStart;
+                    if (evEnd < wStart || evStart > wEnd) return;
+
+                    // Column indices within the week (0-6), including empty leading/trailing cells
+                    let startCol = 0, endCol = 6;
+                    for (let c = 0; c < 7; c++) {
+                        if (weekDays[c].date && weekDays[c].date >= ev.start) { startCol = c; break; }
+                        if (weekDays[c].date) startCol = c; // clamp to first real day if event starts before week
+                    }
+                    for (let c = 6; c >= 0; c--) {
+                        if (weekDays[c].date && weekDays[c].date <= ev.end) { endCol = c; break; }
+                        if (weekDays[c].date) endCol = c;
+                    }
+                    // If event starts before this week, start from first non-empty day
+                    if (ev.start < weekStartISO) {
+                        startCol = weekDays.findIndex(d => d.date);
+                        if (startCol < 0) startCol = 0;
+                    }
+                    if (ev.end > weekEndISO) {
+                        for (let c = 6; c >= 0; c--) {
+                            if (weekDays[c].date) { endCol = c; break; }
+                        }
+                    }
+                    if (endCol < startCol) return;
+                    weekEvents.push({ ev, startCol, endCol });
+                });
+
+                // Assign lanes (greedy)
+                const lanes = [];
+                weekEvents.sort((a, b) => a.startCol - b.startCol || (b.endCol - b.startCol) - (a.endCol - a.startCol));
+                weekEvents.forEach(item => {
+                    let lane = 0;
+                    while (true) {
+                        if (!lanes[lane]) lanes[lane] = [];
+                        const conflict = lanes[lane].some(o => !(item.endCol < o.startCol || item.startCol > o.endCol));
+                        if (!conflict) { lanes[lane].push(item); item.lane = lane; break; }
+                        lane++;
+                    }
+                });
+
+                weekEvents.forEach(item => {
+                    const bar = document.createElement('div');
+                    bar.className = 'cal-event-bar ' + eventColorClass(item.ev) + (item.ev.done ? ' cal-event-done' : '');
+                    const left = (item.startCol / 7) * 100;
+                    const width = ((item.endCol - item.startCol + 1) / 7) * 100;
+                    bar.style.left = 'calc(' + left + '% + 2px)';
+                    bar.style.width = 'calc(' + width + '% - 4px)';
+                    bar.style.top = (TOP_PAD + item.lane * (BAR_H + BAR_GAP)) + 'px';
+                    const label = (item.ev.time ? item.ev.time + ' ' : '') + item.ev.name;
+                    bar.textContent = label;
+                    bar.title = item.ev.name + (item.ev.person ? ' — ' + item.ev.person : '') +
+                        (item.ev.start !== item.ev.end ? ' (' + item.ev.start + ' → ' + item.ev.end + ')' : '');
+                    bar.onclick = () => { if (item.ev.href) location.href = item.ev.href; };
+                    layer.appendChild(bar);
+                });
+
+                // Grow week height to fit lanes
+                const laneCount = lanes.length;
+                const minH = Math.max(100, TOP_PAD + laneCount * (BAR_H + BAR_GAP) + 8);
+                weekEl.style.minHeight = minH + 'px';
+                weekEl.querySelectorAll('.cal-day').forEach(c => { c.style.minHeight = minH + 'px'; });
+
+                weekEl.appendChild(layer);
+                grid.appendChild(weekEl);
             }
         }
         
         render();
+        
+        window.refreshPageData = async function() {
+            await CRM.load();
+            try { goals = await API.get('/goals') || []; } catch (e) {}
+            render();
+        };
     })();
     </script>
 </body>

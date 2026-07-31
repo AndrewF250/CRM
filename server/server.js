@@ -8,12 +8,10 @@ const db = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3005;
 
-// Users database
-const users = [
-  { id: 1, username: 'Костя', password: 'kostya2026', name: 'Костя', role: 'admin', avatar: 'КИ' },
-  { id: 2, username: 'Максим', password: 'maxim2026', name: 'Максим', role: 'admin', avatar: 'МИ' },
-  { id: 3, username: 'Андрей', password: 'andrey2026', name: 'Андрей', role: 'admin', avatar: 'АН' }
-];
+// Helper: make avatar initials from a name
+function makeAvatar(name) {
+  return (name || '?').split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
+}
 
 // Create sessions table if not exists
 db.exec(`
@@ -63,10 +61,32 @@ function logActivity(projectId, taskId, userName, action, details = '') {
   }
 }
 
+// Create a notification for a user (skipped when the user changed their own task)
+function notifyUser(userName, actor, action, message, taskId = null, projectId = null) {
+  try {
+    if (!userName || userName === actor) return;
+    db.prepare('INSERT INTO notifications (user_name, actor, action, message, task_id, project_id) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(userName, actor, action, message, taskId, projectId);
+  } catch (err) {
+    console.error('Failed to create notification:', err);
+  }
+}
+
+// Global change counter for realtime polling: bumped on every successful mutation
+let changeVersion = Date.now();
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Bump change version on successful data mutations (for realtime polling)
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE'].includes(req.method) && req.path.startsWith('/api') && !['/api/login', '/api/logout'].includes(req.path)) {
+    res.on('finish', () => { if (res.statusCode < 400) changeVersion++; });
+  }
+  next();
+});
 
 // File upload
 const storage = multer.diskStorage({
@@ -79,7 +99,7 @@ const upload = multer({ storage });
 
 app.post('/api/login', (req, res) => {
   const { username, password, remember } = req.body;
-  const user = users.find(u => u.username === username && u.password === password);
+  const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?').get(username, password);
   if (!user) return res.status(401).json({ error: 'Неверный логин или пароль' });
   
   const token = generateToken();
@@ -96,6 +116,126 @@ app.post('/api/login', (req, res) => {
     user: { id: user.id, username: user.username, name: user.name, role: user.role, avatar: user.avatar },
     expires_at: expiresAt
   });
+});
+
+// ==================== USERS API ====================
+
+app.get('/api/users', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT id, username, name, role, avatar, created_at FROM users ORDER BY id').all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/users', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор может создавать пользователей' });
+    const { username, password, name, role } = req.body;
+    if (!username || !password || !name) return res.status(400).json({ error: 'Заполните логин, пароль и имя' });
+    if (password.length < 4) return res.status(400).json({ error: 'Пароль минимум 4 символа' });
+    const userRole = (role === 'admin' || role === 'manager') ? role : 'manager';
+    const avatar = makeAvatar(name);
+    const result = db.prepare('INSERT INTO users (username, password, name, role, avatar) VALUES (?, ?, ?, ?, ?)')
+      .run(username.trim(), password, name.trim(), userRole, avatar);
+    const user = db.prepare('SELECT id, username, name, role, avatar, created_at FROM users WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(user);
+  } catch (err) {
+    if (String(err.message).includes('UNIQUE')) return res.status(400).json({ error: 'Такой логин уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/users/:id', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор может удалять пользователей' });
+    const id = parseInt(req.params.id, 10);
+    if (id === req.user.id) return res.status(400).json({ error: 'Нельзя удалить себя' });
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== GOALS API ====================
+
+function mapGoal(g) {
+  if (!g) return null;
+  let assignees = [];
+  try { assignees = JSON.parse(g.assignees || '[]'); } catch (e) { assignees = []; }
+  return { ...g, assignees, progress: g.progress || 0 };
+}
+
+app.get('/api/goals', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM goals ORDER BY date_end ASC, created_at DESC').all();
+    res.json(rows.map(mapGoal));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/goals/:id', requireAuth, (req, res) => {
+  try {
+    const goal = db.prepare('SELECT * FROM goals WHERE id = ?').get(req.params.id);
+    if (!goal) return res.status(404).json({ error: 'Цель не найдена' });
+    res.json(mapGoal(goal));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/goals', requireAuth, (req, res) => {
+  try {
+    const { name, description, assignees, date_start, date_end, status, progress } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Введите название цели' });
+    const id = 'goal_' + Date.now();
+    const list = Array.isArray(assignees) ? assignees : [];
+    db.prepare(`INSERT INTO goals (id, name, description, assignees, date_start, date_end, status, progress, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      id, name.trim(), description || '', JSON.stringify(list),
+      date_start || '', date_end || '', status || 'active', progress || 0, req.user.name
+    );
+    res.status(201).json(mapGoal(db.prepare('SELECT * FROM goals WHERE id = ?').get(id)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/goals/:id', requireAuth, (req, res) => {
+  try {
+    const old = db.prepare('SELECT * FROM goals WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Цель не найдена' });
+    const { name, description, assignees, date_start, date_end, status, progress } = req.body;
+    const list = Array.isArray(assignees) ? assignees : JSON.parse(old.assignees || '[]');
+    db.prepare(`UPDATE goals SET name=?, description=?, assignees=?, date_start=?, date_end=?, status=?, progress=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+      name !== undefined ? name : old.name,
+      description !== undefined ? description : old.description,
+      JSON.stringify(list),
+      date_start !== undefined ? date_start : old.date_start,
+      date_end !== undefined ? date_end : old.date_end,
+      status !== undefined ? status : old.status,
+      progress !== undefined ? progress : old.progress,
+      req.params.id
+    );
+    res.json(mapGoal(db.prepare('SELECT * FROM goals WHERE id = ?').get(req.params.id)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/goals/:id', requireAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM goals WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/logout', (req, res) => {
@@ -147,14 +287,14 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
 
 app.post('/api/projects', requireAuth, (req, res) => {
   try {
-    const { id, name, client, phone, amount, status, urgent, deadline, progress, pay_status, pay_method, discount, discount_val, adequacy, source, description, hashtags, payment_due_date } = req.body;
+    const { id, name, client, phone, amount, status, urgent, deadline, progress, pay_status, pay_method, discount, discount_val, adequacy, source, description, hashtags, payment_due_date, assignee } = req.body;
     const projectId = id || 'proj_' + Date.now();
     
-    db.prepare(`INSERT INTO projects (id, name, client, phone, amount, status, urgent, deadline, progress, pay_status, pay_method, discount, discount_val, adequacy, source, description, hashtags, payment_due_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    db.prepare(`INSERT INTO projects (id, name, client, phone, amount, status, urgent, deadline, progress, pay_status, pay_method, discount, discount_val, adequacy, source, description, hashtags, payment_due_date, assignee)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       projectId, name, client, phone || '', amount || 0, status || 'Новый', urgent ? 1 : 0, deadline, progress || 0,
       pay_status || 'unpaid', pay_method || 'По счёту', discount || 'no', discount_val || '',
-      adequacy || 'good', source || 'Сайт', description || '', JSON.stringify(hashtags || []), payment_due_date || ''
+      adequacy || 'good', source || 'Сайт', description || '', JSON.stringify(hashtags || []), payment_due_date || '', assignee || ''
     );
     
     // Create reminder if payment_due_date is set
@@ -178,15 +318,16 @@ app.post('/api/projects', requireAuth, (req, res) => {
 
 app.put('/api/projects/:id', requireAuth, (req, res) => {
   try {
-    const { name, client, phone, amount, status, urgent, deadline, progress, pay_status, pay_method, discount, discount_val, adequacy, source, description, hashtags, payment_due_date } = req.body;
+    const { name, client, phone, amount, status, urgent, deadline, progress, pay_status, pay_method, discount, discount_val, adequacy, source, description, hashtags, payment_due_date, assignee } = req.body;
     
     const old = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     
-    db.prepare(`UPDATE projects SET name=?, client=?, phone=?, amount=?, status=?, urgent=?, deadline=?, progress=?, pay_status=?, pay_method=?, discount=?, discount_val=?, adequacy=?, source=?, description=?, hashtags=?, payment_due_date=?, updated_at=CURRENT_TIMESTAMP
+    db.prepare(`UPDATE projects SET name=?, client=?, phone=?, amount=?, status=?, urgent=?, deadline=?, progress=?, pay_status=?, pay_method=?, discount=?, discount_val=?, adequacy=?, source=?, description=?, hashtags=?, payment_due_date=?, assignee=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?`).run(
       name, client, phone || '', amount, status, urgent ? 1 : 0, deadline, progress,
       pay_status, pay_method, discount, discount_val, adequacy, source,
-      description, JSON.stringify(hashtags || []), payment_due_date || '', req.params.id
+      description, JSON.stringify(hashtags || []), payment_due_date || '',
+      assignee !== undefined ? assignee : (old ? old.assignee : ''), req.params.id
     );
     
     // Update reminder if payment_due_date changed
@@ -256,20 +397,26 @@ app.get('/api/tasks', requireAuth, (req, res) => {
     } else {
       tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all();
     }
-    res.json(tasks.map(t => ({
-      ...t,
-      done: !!t.done,
-      urgent: !!t.urgent,
-      hashtags: JSON.parse(t.hashtags || '[]')
-    })));
+    res.json(tasks.map(mapTaskRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+function mapTaskRow(task) {
+  if (!task) return null;
+  return {
+    ...task,
+    done: !!task.done,
+    urgent: !!task.urgent,
+    is_epic: !!task.is_epic,
+    hashtags: JSON.parse(task.hashtags || '[]')
+  };
+}
+
 app.post('/api/tasks', requireAuth, (req, res) => {
   try {
-    const { id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description } = req.body;
+    const { id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic } = req.body;
     const taskId = id || 'task_' + Date.now();
     
     // Validate parent_id
@@ -277,20 +424,25 @@ app.post('/api/tasks', requireAuth, (req, res) => {
       if (parent_id === taskId) return res.status(400).json({ error: 'Задача не может быть подзадачей самой себя' });
       const parent = db.prepare('SELECT * FROM tasks WHERE id = ?').get(parent_id);
       if (!parent) return res.status(400).json({ error: 'Родительская задача не найдена' });
-      if (parent.project_id !== project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
+      if ((parent.project_id || '') !== (project_id || '')) {
+        return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
+      }
     }
     
-    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    const creator = (req.user && req.user.name) || '';
+    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, created_by, updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       taskId, project_id || '', name, column_status || 'Ожидает', person || 'Костя',
-      date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium', description || ''
+      date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium', description || '', is_epic ? 1 : 0,
+      creator, creator
     );
     
     if (project_id) updateProjectProgress(project_id);
     logActivity(project_id || '', taskId, req.user.name, 'create_task', `Создана задача: ${name}`);
+    notifyUser(person || '', req.user.name, 'create_task', `${req.user.name} назначил вам задачу «${name}»`, taskId, project_id || null);
     
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
-    res.status(201).json({ ...task, done: !!task.done, urgent: !!task.urgent, hashtags: JSON.parse(task.hashtags || '[]') });
+    res.status(201).json(mapTaskRow(task));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -298,7 +450,7 @@ app.post('/api/tasks', requireAuth, (req, res) => {
 
 app.put('/api/tasks/:id', requireAuth, (req, res) => {
   try {
-    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description } = req.body;
+    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic } = req.body;
     
     const old = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Задача не найдена' });
@@ -314,13 +466,18 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
         checkId = p ? p.parent_id : null;
       }
       const parent = db.prepare('SELECT * FROM tasks WHERE id = ?').get(newParentId);
-      if (parent && parent.project_id !== old.project_id) return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
+      if (parent && (parent.project_id || '') !== (old.project_id || '')) {
+        return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
+      }
     }
+
+    const epicFlag = is_epic !== undefined ? (is_epic ? 1 : 0) : (old.is_epic ? 1 : 0);
     
-    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, description=?, updated_at=CURRENT_TIMESTAMP
+    const updater = (req.user && req.user.name) || '';
+    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, description=?, is_epic=?, updated_by=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?`).run(
       name, column_status, person, date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0,
-      JSON.stringify(hashtags || []), newParentId, priority || 'medium', description || '', req.params.id
+      JSON.stringify(hashtags || []), newParentId, priority || 'medium', description || '', epicFlag, updater, req.params.id
     );
     
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
@@ -329,9 +486,28 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
       if (old && old.done !== (done ? 1 : 0)) {
         logActivity(task.project_id, req.params.id, req.user.name, done ? 'complete_task' : 'uncomplete_task', name);
       }
+      
+      // Notify assignees about changes made by someone else
+      if (old) {
+        const changes = [];
+        if (old.name !== name) changes.push(`название: «${old.name}» → «${name}»`);
+        if (old.column_status !== column_status) changes.push(`статус: ${old.column_status} → ${column_status}`);
+        if (old.done !== (done ? 1 : 0)) changes.push(done ? 'выполнена' : 'возвращена в работу');
+        if ((old.date || '') !== (date || '')) changes.push('изменена дата');
+        if ((old.date_end || '') !== (date_end || '')) changes.push('изменён дедлайн');
+        if ((old.description || '') !== (description || '')) changes.push('изменено описание');
+        
+        if (old.person !== person) {
+          // Reassigned: notify both old and new assignee
+          notifyUser(person, req.user.name, 'assign_task', `${req.user.name} назначил вам задачу «${name}»`, task.id, task.project_id || null);
+          notifyUser(old.person, req.user.name, 'reassign_task', `${req.user.name} переназначил задачу «${old.name}» на ${person}`, task.id, task.project_id || null);
+        } else if (changes.length > 0) {
+          notifyUser(old.person, req.user.name, 'update_task', `${req.user.name} изменил задачу «${old.name}»: ${changes.join(', ')}`, task.id, task.project_id || null);
+        }
+      }
     }
     
-    res.json({ ...task, done: !!task.done, urgent: !!task.urgent, hashtags: JSON.parse(task.hashtags || '[]') });
+    res.json(mapTaskRow(task));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -341,7 +517,10 @@ app.delete('/api/tasks/:id', requireAuth, (req, res) => {
   try {
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
-    if (task) updateProjectProgress(task.project_id);
+    if (task) {
+      updateProjectProgress(task.project_id);
+      notifyUser(task.person, req.user.name, 'delete_task', `${req.user.name} удалил задачу «${task.name}»`, null, task.project_id || null);
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -790,6 +969,54 @@ app.delete('/api/reminders/:id', requireAuth, (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ==================== NOTIFICATIONS API ====================
+
+app.get('/api/notifications', requireAuth, (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const offset = parseInt(req.query.offset) || 0;
+    const items = db.prepare('SELECT * FROM notifications WHERE user_name = ? ORDER BY id DESC LIMIT ? OFFSET ?').all(req.user.name, limit, offset);
+    const unread = db.prepare('SELECT COUNT(*) as c FROM notifications WHERE user_name = ? AND is_read = 0').get(req.user.name).c;
+    const total = db.prepare('SELECT COUNT(*) as c FROM notifications WHERE user_name = ?').get(req.user.name).c;
+    res.json({ items: items.map(n => ({ ...n, is_read: !!n.is_read })), unread, total });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/notifications/read-all', requireAuth, (req, res) => {
+  try {
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE user_name = ?').run(req.user.name);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/notifications/:id/read', requireAuth, (req, res) => {
+  try {
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_name = ?').run(req.params.id, req.user.name);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/notifications/all', requireAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM notifications WHERE user_name = ?').run(req.user.name);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== VERSION (realtime polling) ====================
+
+app.get('/api/version', requireAuth, (req, res) => {
+  res.json({ v: changeVersion });
 });
 
 // ==================== STATS API ====================

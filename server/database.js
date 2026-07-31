@@ -227,4 +227,85 @@ db.exec(`
   );
 `);
 
+// Per-user notifications about task changes
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_name TEXT NOT NULL,
+    actor TEXT DEFAULT '',
+    action TEXT DEFAULT '',
+    message TEXT NOT NULL,
+    task_id TEXT,
+    project_id TEXT,
+    is_read INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_name, is_read);
+`);
+
+// Migration: add assignee to projects
+try {
+  db.prepare("SELECT assignee FROM projects LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE projects ADD COLUMN assignee TEXT DEFAULT ''");
+}
+
+// Users table (login accounts)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT DEFAULT 'manager',
+    avatar TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// Seed default users if table is empty
+const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+if (userCount === 0) {
+  const insertUser = db.prepare('INSERT INTO users (username, password, name, role, avatar) VALUES (?, ?, ?, ?, ?)');
+  insertUser.run('Костя', 'kostya2026', 'Костя', 'admin', 'КИ');
+  insertUser.run('Максим', 'maxim2026', 'Максим', 'admin', 'МИ');
+  insertUser.run('Андрей', 'andrey2026', 'Андрей', 'admin', 'АН');
+}
+
+// Migration: epic flag for tasks (Agile-style parent stories)
+try {
+  db.prepare("SELECT is_epic FROM tasks LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE tasks ADD COLUMN is_epic INTEGER DEFAULT 0");
+}
+
+// Migration: track who created / last updated a task
+try {
+  db.prepare("SELECT created_by FROM tasks LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE tasks ADD COLUMN created_by TEXT DEFAULT ''");
+}
+try {
+  db.prepare("SELECT updated_by FROM tasks LIMIT 1").get();
+} catch (e) {
+  db.exec("ALTER TABLE tasks ADD COLUMN updated_by TEXT DEFAULT ''");
+}
+
+// Goals (team objectives with multi-assignees and calendar dates)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    assignees TEXT DEFAULT '[]',
+    date_start TEXT DEFAULT '',
+    date_end TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
+    progress INTEGER DEFAULT 0,
+    created_by TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 module.exports = db;

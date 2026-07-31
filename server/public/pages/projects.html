@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Проекты — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/style.css?v=16">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=6"></script>
-    <script src="/assets/js/app.js?v=6"></script>
-    <script src="/assets/js/crm-data.js?v=6"></script>
+    <script src="/assets/js/api.js?v=16"></script>
+    <script src="/assets/js/app.js?v=16"></script>
+    <script src="/assets/js/crm-data.js?v=16"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -290,7 +290,7 @@
             kanbanHtml += '</div>';
             document.getElementById('kanbanView').innerHTML = kanbanHtml;
 
-            let tableHtml = '<div class="card"><div class="table-wrapper"><table class="table"><thead><tr><th>Проект</th><th>Клиент</th><th>Команда</th><th>Статус</th><th>Оплата</th><th>Сумма</th><th>Прогресс</th><th></th></tr></thead><tbody>';
+            let tableHtml = '<div class="card"><div class="table-wrapper"><table class="table"><thead><tr><th>Проект</th><th>Клиент</th><th>Команда</th><th>Статус</th><th>Оплата</th><th>Сумма</th><th></th></tr></thead><tbody>';
             projects.forEach(p => {
                 const adeqEmoji = { 'good': '😊', 'warn': '😐', 'bad': '😡' };
                 tableHtml += `<tr>
@@ -300,7 +300,6 @@
                     <td><span class="badge ${getStatusClass(p.status)}">${p.status}</span></td>
                     <td><span class="pay-icon ${p.pay_status || 'unpaid'}" title="${p.pay_status === 'paid' ? 'Оплачено' : p.pay_status === 'pending' ? 'Ждём' : 'Не оплачено'}">$</span> <span class="adequacy-icon ${p.adequacy || 'good'}" title="${p.adequacy === 'good' ? 'Нормальный' : p.adequacy === 'warn' ? 'Осторожно' : 'Не работаем'}">${adeqEmoji[p.adequacy] || '😊'}</span></td>
                     <td class="table-cell-amount">${formatAmountInput(p.amount)} ₽</td>
-                    <td><div class="progress-bar" style="width:80px;"><div class="progress-fill" style="width:${p.progress}%;"></div></div></td>
                     <td><button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteProject('${p.id}')">Удалить</button></td>
                 </tr>`;
             });
@@ -311,6 +310,12 @@
         }
         
         renderProjects();
+        
+        // Realtime refresh hook
+        window.refreshPageData = async function() {
+            await CRM.load();
+            renderProjects();
+        };
         
         function initDragDrop() {
             const cards = document.querySelectorAll('.kanban-card[draggable]');
@@ -372,6 +377,8 @@
         
         window.showNewProjectModal = function() {
             const overlay = document.getElementById('modalOverlay');
+            const currentUser = API.getCurrentUser();
+            const assigneeOpts = ['Костя', 'Максим', 'Андрей'].map(p => `<option${currentUser && currentUser.name === p ? ' selected' : ''}>${p}</option>`).join('');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
                     <div class="modal-header"><h3 class="modal-title">Новый проект</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
@@ -387,20 +394,22 @@
                         <div class="form-row">
                             <div class="form-group"><label class="form-label" for="newProjectDeadline">Дедлайн</label><input type="date" class="form-input" id="newProjectDeadline" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                             <div class="form-group"><label class="form-label" for="newProjectPayDate">Дата оплаты</label><input type="date" class="form-input" id="newProjectPayDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newProjectStatus">Статус</label><select class="form-select" id="newProjectStatus" onclick="event.stopPropagation()"><option>Новый</option><option>Переговоры</option><option>В работе</option></select></div>
+                            <div class="form-group"><label class="form-label" for="newProjectStatus">Статус</label><select class="form-select" id="newProjectStatus" onclick="event.stopPropagation()">${(kanbanColumns.length ? kanbanColumns : [{name:'Новый'},{name:'Переговоры'},{name:'В работе'}]).map(c => '<option>' + c.name + '</option>').join('')}</select></div>
+                            <div class="form-group"><label class="form-label" for="newProjectAssignee">Исполнитель</label><select class="form-select" id="newProjectAssignee" onclick="event.stopPropagation()">${assigneeOpts}</select></div>
                         </div>
                         <div class="form-row">
                             <div class="form-group"><label class="form-label" for="newProjectSource">Источник</label><select class="form-select" id="newProjectSource" onclick="event.stopPropagation()"><option>Сайт</option><option>Авито</option><option>Telegram</option><option>Реклама</option><option>Знакомые</option></select></div>
                             <div class="form-group"><label class="form-label" for="newProjectAdequacy">Адекватность</label><select class="form-select" id="newProjectAdequacy" onclick="event.stopPropagation()"><option value="good">Нормальный</option><option value="warn">Осторожно</option><option value="bad">Не работаем</option></select></div>
                         </div>
                         <div class="form-group"><label class="form-label" for="newProjectHashtags">Хештеги (через запятую)</label><input type="text" class="form-input" id="newProjectHashtags" placeholder="#wordpress, #сайт, #лендинг" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                        <div class="form-group"><label class="form-label" for="newProjectDescription">Описание</label><textarea class="form-textarea" id="newProjectDescription" placeholder="Описание проекта" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></textarea></div>
+                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('newProjectDescription', '', 'Описание проекта…')}</div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createProject()">Создать</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
+            bindRichEditor('newProjectDescription');
         };
         
         window.formatAmountField = function(input) {
@@ -434,9 +443,10 @@
                     deadline: document.getElementById('newProjectDeadline').value || '—',
                     payment_due_date: document.getElementById('newProjectPayDate').value || '',
                     status: document.getElementById('newProjectStatus').value,
+                    assignee: document.getElementById('newProjectAssignee').value,
                     source: document.getElementById('newProjectSource').value,
                     adequacy: document.getElementById('newProjectAdequacy').value,
-                    description: document.getElementById('newProjectDescription').value || '',
+                    description: getDescValue('newProjectDescription'),
                     urgent: false,
                     progress: 0,
                     pay_status: 'unpaid',

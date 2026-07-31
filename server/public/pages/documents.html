@@ -28,9 +28,9 @@
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=8"></script>
-    <script src="/assets/js/app.js?v=8"></script>
-    <script src="/assets/js/crm-data.js?v=8"></script>
+    <script src="/assets/js/api.js?v=11"></script>
+    <script src="/assets/js/app.js?v=16"></script>
+    <script src="/assets/js/crm-data.js?v=11"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -356,6 +356,12 @@
         
         await CRM.load();
         render();
+        
+        // Realtime refresh hook
+        window.refreshPageData = async function() {
+            await CRM.load();
+            renderTabContent();
+        };
     })();
     </script>
 </body>

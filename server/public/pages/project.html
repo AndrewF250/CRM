@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Проект — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/style.css?v=27">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=8"></script>
-    <script src="/assets/js/app.js?v=8"></script>
-    <script src="/assets/js/crm-data.js?v=8"></script>
+    <script src="/assets/js/api.js?v=17"></script>
+    <script src="/assets/js/app.js?v=27"></script>
+    <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -46,9 +46,50 @@
         const tasks = CRM.getTasks(projectId);
         const docs = await API.getDocuments(projectId);
         const calls = await API.getCalls(projectId);
+
+        // Dynamic columns from settings (not hardcoded)
+        let taskColumns = [];
+        let projectColumns = [];
+        let teamUsers = [];
+        try { taskColumns = await API.get('/task-columns') || []; } catch (e) { taskColumns = []; }
+        try { projectColumns = await API.get('/kanban-columns') || []; } catch (e) { projectColumns = []; }
+        try { teamUsers = await API.get('/users') || []; } catch (e) { teamUsers = []; }
+
+        if (!taskColumns.length) {
+            taskColumns = [
+                { name: 'Ожидает', color: 'gray' },
+                { name: 'В работе', color: 'green' },
+                { name: 'Простой', color: 'yellow' },
+                { name: 'Готово', color: 'gray' }
+            ];
+        }
+        if (!projectColumns.length) {
+            projectColumns = [
+                { name: 'Новый', color: 'blue' },
+                { name: 'Переговоры', color: 'yellow' },
+                { name: 'В работе', color: 'green' },
+                { name: 'Выполнено', color: 'gray' }
+            ];
+        }
         
-        // Status colors
-        const statusColors = { 'Новый': 'badge-primary', 'Переговоры': 'badge-warning', 'В работе': 'badge-success', 'Абонемент': 'badge-info', 'Выполнено': 'badge-gray' };
+        // Realtime refresh hook: the page renders from top-level data, so reload
+        window.refreshPageData = function() { location.reload(); };
+        
+        const colorHexMap = { blue: '#3B82F6', yellow: '#F59E0B', green: '#10B981', gray: '#9CA3AF', red: '#EF4444', purple: '#8B5CF6', pink: '#EC4899', orange: '#F97316', teal: '#14B8A6', indigo: '#6366F1', lime: '#84CC16', cyan: '#06B6D4' };
+        const colorBgMap = { blue: 'var(--info-light)', yellow: 'var(--warning-light)', green: 'var(--success-light)', gray: 'var(--gray-100)', red: 'var(--danger-light)', purple: '#F3E8FF', orange: '#FFF7ED', teal: '#F0FDFA' };
+        function getColHex(color) { return colorHexMap[color] || (color && String(color).startsWith('#') ? color : '#9CA3AF'); }
+        function getColBg(color) { return colorBgMap[color] || 'var(--gray-100)'; }
+        function badgeForStatus(status) {
+            const col = projectColumns.find(c => c.name === status);
+            const c = col ? col.color : 'gray';
+            if (c === 'green') return 'badge-success';
+            if (c === 'yellow' || c === 'orange') return 'badge-warning';
+            if (c === 'red') return 'badge-danger';
+            if (c === 'blue' || c === 'indigo' || c === 'cyan') return 'badge-primary';
+            if (c === 'purple' || c === 'pink') return 'badge-info';
+            return 'badge-gray';
+        }
+
         const payIcons = { 'unpaid': 'unpaid', 'pending': 'pending', 'paid': 'paid' };
         const adeqEmoji = { 'good': '😊', 'warn': '😐', 'bad': '😡' };
         const adeqLabel = { 'good': 'Нормальный', 'warn': 'Осторожно', 'bad': 'Не работаем' };
@@ -67,45 +108,63 @@
             const diff = (due - now) / (1000 * 60 * 60 * 24);
             return diff >= 0 && diff <= 3;
         }
-        
-        // Kanban columns for tasks
-        const columns = [
-            { name: 'Готово', dot: 'gray', bg: 'var(--gray-100)' },
-            { name: 'В работе', dot: 'green', bg: 'var(--success-light)' },
-            { name: 'Согласуем', dot: 'yellow', bg: 'var(--warning-light)' },
-            { name: 'Ожидает', dot: 'gray', bg: 'var(--gray-100)' }
-        ];
-        
-        let kanbanHtml = '<div style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;">';
-        columns.forEach(col => {
-            const colTasks = tasks.filter(t => t.column_status === col.name && !t.parent_id);
-            const childrenMap = {};
-            tasks.filter(t => t.parent_id).forEach(t => {
-                if (!childrenMap[t.parent_id]) childrenMap[t.parent_id] = [];
-                childrenMap[t.parent_id].push(t);
-            });
 
-            kanbanHtml += `<div class="kanban-column" style="min-width:200px;flex:1;background:${col.bg};border-radius:var(--radius-lg);padding:12px;">
-                <div style="font-weight:700;font-size:0.85rem;color:var(--gray-600);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
-                    <span class="status-dot ${col.dot}"></span> ${col.name} <span class="kanban-count" style="background:var(--gray-300);color:var(--gray-700);font-size:0.6rem;padding:2px 6px;border-radius:var(--radius-full);">${colTasks.length}</span>
+        // Status options for project (from kanban column settings)
+        let statusSelectOpts = projectColumns.map(c =>
+            `<option value="${c.name}"${c.name === project.status ? ' selected' : ''}>${c.name}</option>`
+        ).join('');
+        if (project.status && !projectColumns.some(c => c.name === project.status)) {
+            statusSelectOpts = `<option value="${project.status}" selected>${project.status}</option>` + statusSelectOpts;
+        }
+        
+        // Kanban for tasks — columns from task status settings
+        const childrenMap = {};
+        tasks.filter(t => t.parent_id).forEach(t => {
+            if (!childrenMap[t.parent_id]) childrenMap[t.parent_id] = [];
+            childrenMap[t.parent_id].push(t);
+        });
+
+        let kanbanHtml = '<div class="kanban-board" style="min-height:200px;">';
+        taskColumns.forEach(col => {
+            const colTasks = tasks.filter(t => t.column_status === col.name && !t.parent_id);
+            const hex = getColHex(col.color);
+            const bg = getColBg(col.color);
+
+            kanbanHtml += `<div class="kanban-column" style="background:${bg};">
+                <div class="kanban-column-header">
+                    <div class="kanban-column-title"><span class="status-dot" style="background:${hex}"></span> ${col.name} <span class="kanban-count">${colTasks.length}</span></div>
                 </div>
                 <div class="kanban-column-body" data-column="${col.name}" style="min-height:60px;">`;
             
             colTasks.forEach(t => {
                 const children = childrenMap[t.id] || [];
-                kanbanHtml += `<div class="kanban-card" data-task-id="${t.id}" style="background:var(--white);border-radius:var(--radius-md);padding:10px;margin-bottom:8px;cursor:grab;">
-                    <div style="display:flex;align-items:center;gap:6px;">
-                        <input type="checkbox" ${t.done ? 'checked' : ''} style="width:14px;height:14px;" onchange="toggleTask('${t.id}', this.checked)">
-                        <span style="font-weight:600;font-size:0.85rem;${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</span>
-                        ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + '</span>' : ''}
-                    </div>
-                    <div style="font-size:0.7rem;color:var(--gray-500);margin-top:4px;">${t.person} · ${t.date || ''} ${t.time || ''}</div>`;
+                const statusHex = getColHex(col.color);
+                const isPaused = t.column_status === 'Простой';
+                const menuItems = buildProjectTaskMenu(t);
+                const range = formatTaskDateRange(t);
+                kanbanHtml += `<div class="kanban-card${t.done ? ' done' : ''}" data-task-id="${t.id}" draggable="true" style="border-left-color:${statusHex};" onclick="if(!event.target.closest('.task-actions') && !event.target.closest('.desc-clamp-wrap'))location.href='/pages/task.html?id=${t.id}'">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+                        <div style="flex:1;min-width:0;">
+                            <div class="task-title-row">
+                                ${renderPriorityMark(t.priority)}
+                                <div style="font-weight:600;font-size:0.85rem;${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${String(t.name || '').replace(/</g,'&lt;')}</div>
+                            </div>
+                            ${t.description ? renderDescClamp(t.description, { lines: 2, id: 'dpk_' + t.id }) : ''}
+                            <div style="font-size:0.7rem;color:var(--gray-500);margin-top:4px;">${t.person || ''}${range ? ' · ' + range : ''}</div>
+                            ${children.length > 0 ? '<span class="task-nest-badge" style="margin-top:4px;display:inline-block;">' + children.length + '</span>' : ''}
+                            ${isPaused ? '<span class="badge badge-warning" style="font-size:0.65rem;margin-top:4px;">ПРОСТОЙ</span>' : ''}
+                        </div>
+                        <div class="task-actions" onclick="event.stopPropagation()">
+                            <div class="task-menu-tray">${menuItems}</div>
+                            <button type="button" class="task-action-btn task-menu-btn" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskMenu(this)" title="Действия" aria-label="Меню действий"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+                        </div>
+                    </div>`;
                 if (children.length > 0) {
                     kanbanHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--gray-100);">';
                     children.forEach(child => {
-                        kanbanHtml += `<div class="kanban-subtask${child.done ? ' done' : ''}" style="display:flex;align-items:center;gap:4px;padding:2px 0;">
-                            <input type="checkbox" ${child.done ? 'checked' : ''} style="width:12px;height:12px;" onchange="toggleTask('${child.id}', this.checked)">
-                            <span style="font-size:0.75rem;${child.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${child.name}</span>
+                        kanbanHtml += `<div class="kanban-subtask${child.done ? ' done' : ''}" style="display:flex;align-items:center;gap:4px;padding:2px 0;cursor:pointer;" onclick="event.stopPropagation();location.href='/pages/task.html?id=${child.id}'">
+                            ${renderPriorityMark(child.priority)}
+                            <span style="font-size:0.75rem;${child.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${String(child.name || '').replace(/</g,'&lt;')}</span>
                         </div>`;
                     });
                     kanbanHtml += '</div>';
@@ -156,7 +215,7 @@
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                         <h1 class="page-title">${project.name}</h1>
                         ${project.urgent ? '<span class="badge badge-danger">СРОЧНО</span>' : ''}
-                        <span class="badge ${statusColors[project.status] || 'badge-gray'}">${project.status}</span>
+                        <span class="badge ${badgeForStatus(project.status)}" id="projectStatusBadge">${project.status}</span>
                         <span class="pay-icon ${payIcons[project.pay_status] || 'unpaid'}" title="${project.pay_status}">$</span>
                         <span class="adequacy-icon ${project.adequacy || 'good'}" title="${adeqLabel[project.adequacy] || 'Нормальный'}">${adeqEmoji[project.adequacy] || '😊'}</span>
                     </div>
@@ -171,7 +230,7 @@
             
             <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));">
                 <div class="stat-card"><div class="stat-info"><div class="stat-label">Сумма</div><div class="stat-value" style="font-size:1.3rem;">${formatAmount(project.amount)}</div></div></div>
-                <div class="stat-card"><div class="stat-info"><div class="stat-label">Статус</div><div style="margin-top:4px;"><span class="badge ${statusColors[project.status]}">${project.status}</span></div></div></div>
+                <div class="stat-card"><div class="stat-info"><div class="stat-label">Статус</div><div style="margin-top:6px;"><select class="form-select" id="projectStatusSelect" onchange="changeProjectStatus(this.value)" style="width:100%;min-width:0;padding:6px 32px 6px 10px;font-size:0.85rem;">${statusSelectOpts}</select></div></div></div>
                 <div class="stat-card"><div class="stat-info"><div class="stat-label">Оплата</div><div style="display:flex;align-items:center;gap:8px;margin-top:4px;"><span class="pay-icon ${payIcons[project.pay_status]}">$</span><span class="fw-600">${project.pay_method || 'По счёту'}</span></div></div></div>
                 <div class="stat-card"><div class="stat-info"><div class="stat-label">Источник</div><div style="margin-top:6px;"><span class="source-tag">${project.source || '—'}</span></div></div></div>
                 <div class="stat-card"><div class="stat-info"><div class="stat-label">Дата оплаты</div><div style="margin-top:6px;font-weight:600;${isPaymentDueSoon(project.payment_due_date) ? 'color:var(--danger);' : ''}">${project.payment_due_date ? formatDate(project.payment_due_date) : '—'}</div></div></div>
@@ -179,17 +238,7 @@
             
             <div class="card" style="margin-bottom:16px;">
                 <div class="card-header"><h3 class="card-title">Описание</h3></div>
-                <div class="card-body"><p style="font-size:0.9rem;color:var(--gray-700);line-height:1.6;">${project.description || 'Нет описания'}</p></div>
-            </div>
-            
-            <div class="card" style="margin-bottom:24px;">
-                <div class="card-body">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                        <span class="fw-600">Прогресс</span>
-                        <span class="fw-600 text-primary">${project.progress || 0}%</span>
-                    </div>
-                    <div class="progress-bar"><div class="progress-fill" style="width:${project.progress || 0}%;"></div></div>
-                </div>
+                <div class="card-body">${project.description ? '<div class="rich-content">' + renderRichHtml(project.description) + '</div>' : '<p class="text-muted">Нет описания</p>'}</div>
             </div>
             
             <div class="tabs">
@@ -257,54 +306,71 @@
         // Init kanban drag and drop for tasks
         initKanban();
         
-        // Add drag-to-nest on kanban cards
+        // Nesting via drag: drop one card onto another (same project)
         function initKanbanNest() {
-            const cards = document.querySelectorAll('.kanban-card[data-task-id]');
-            let draggedId = null;
-
-            cards.forEach(card => {
-                card.addEventListener('dragstart', (e) => {
-                    draggedId = card.dataset.taskId;
-                    e.dataTransfer.setData('text/nest-id', draggedId);
-                }, true);
-
-                card.addEventListener('dragover', (e) => {
-                    if (draggedId && card.dataset.taskId !== draggedId) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        card.classList.add('drop-target');
-                    }
-                });
-
-                card.addEventListener('dragleave', () => {
-                    card.classList.remove('drop-target');
-                });
-
-                card.addEventListener('drop', async (e) => {
+            document.querySelectorAll('.kanban-card[data-task-id]').forEach(card => {
+                card.ondragover = (e) => {
+                    const dragging = document.querySelector('.kanban-card.dragging');
+                    if (!dragging || dragging === card) return;
                     e.preventDefault();
                     e.stopPropagation();
+                    card.classList.add('drop-target');
+                };
+                card.ondragleave = () => card.classList.remove('drop-target');
+                card.ondrop = async (e) => {
+                    const dragging = document.querySelector('.kanban-card.dragging');
                     card.classList.remove('drop-target');
+                    if (!dragging || dragging === card) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const draggedId = dragging.dataset.taskId;
                     const targetId = card.dataset.taskId;
-                    if (!draggedId || draggedId === targetId) return;
-
+                    if (!draggedId || !targetId || draggedId === targetId) return;
                     try {
-                        const task = (await API.getTasks()).find(t => t.id === draggedId);
-                        if (!task) return;
-                        await API.updateTask(draggedId, { ...task, parent_id: targetId });
+                        const task = CRM.getTasks().find(t => t.id === draggedId);
+                        const target = CRM.getTasks().find(t => t.id === targetId);
+                        if (!task || !target) return;
+                        if ((task.project_id || '') !== (target.project_id || '')) {
+                            showToast('Только задачи одного проекта', 'error');
+                            return;
+                        }
+                        await CRM.updateTask(draggedId, { parent_id: targetId });
                         showToast('Задача вложена', 'success');
-                        setTimeout(() => location.reload(), 500);
+                        setTimeout(() => location.reload(), 400);
                     } catch (err) {
                         showToast(err.message || 'Ошибка', 'error');
                     }
-                });
+                };
             });
         }
         initKanbanNest();
         
+        // Change project status from dropdown (uses kanban column settings)
+        window.changeProjectStatus = async function(newStatus) {
+            try {
+                await API.updateProject(projectId, {
+                    ...project,
+                    status: newStatus,
+                    hashtags: project.hashtags || []
+                });
+                project.status = newStatus;
+                const badge = document.getElementById('projectStatusBadge');
+                if (badge) {
+                    badge.textContent = newStatus;
+                    badge.className = 'badge ' + badgeForStatus(newStatus);
+                }
+                showToast('Статус: ' + newStatus, 'success');
+            } catch (err) {
+                showToast(err.message || 'Ошибка', 'error');
+            }
+        };
+
         // Toggle task done
         window.toggleTask = async function(taskId, done) {
             try {
-                await CRM.updateTask(taskId, { done: done, column_status: done ? 'Готово' : 'В работе' });
+                const doneCol = taskColumns.find(c => /готов|done|выполн/i.test(c.name)) || taskColumns[taskColumns.length - 1];
+                const workCol = taskColumns.find(c => /работ/i.test(c.name)) || taskColumns[0];
+                await CRM.updateTask(taskId, { done: done, column_status: done ? (doneCol?.name || 'Готово') : (workCol?.name || 'В работе') });
                 showToast(done ? 'Выполнено' : 'В работе', 'success');
                 setTimeout(() => location.reload(), 500);
             } catch (err) {
@@ -350,7 +416,7 @@
                             <div class="form-group"><label class="form-label" for="editClient">Клиент</label><input type="text" class="form-input" id="editClient" value="${project.client}" onclick="event.stopPropagation()"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="editStatus">Статус</label><select class="form-select" id="editStatus" onclick="event.stopPropagation()"><option${project.status==='Новый'?' selected':''}>Новый</option><option${project.status==='Переговоры'?' selected':''}>Переговоры</option><option${project.status==='В работе'?' selected':''}>В работе</option><option${project.status==='Абонемент'?' selected':''}>Абонемент</option><option${project.status==='Выполнено'?' selected':''}>Выполнено</option></select></div>
+                            <div class="form-group"><label class="form-label" for="editStatus">Статус</label><select class="form-select" id="editStatus" onclick="event.stopPropagation()">${statusSelectOpts}</select></div>
                             <div class="form-group"><label class="form-label" for="editAmount">Сумма (₽)</label><input type="number" class="form-input" id="editAmount" value="${project.amount}" onclick="event.stopPropagation()"></div>
                             <div class="form-group"><label class="form-label" for="editDeadline">Дедлайн</label><input type="text" class="form-input" id="editDeadline" value="${project.deadline || ''}" onclick="event.stopPropagation()"></div>
                             <div class="form-group"><label class="form-label" for="editPayDate">Дата оплаты</label><input type="date" class="form-input" id="editPayDate" value="${project.payment_due_date || ''}" onclick="event.stopPropagation()"></div>
@@ -363,13 +429,14 @@
                             <div class="form-group"><label class="form-label" for="editAdequacy">Адекватность</label><select class="form-select" id="editAdequacy" onclick="event.stopPropagation()"><option value="good"${project.adequacy==='good'?' selected':''}>Нормальный</option><option value="warn"${project.adequacy==='warn'?' selected':''}>Осторожно</option><option value="bad"${project.adequacy==='bad'?' selected':''}>Не работаем</option></select></div>
                             <div class="form-group"><label class="form-label" for="editSource">Источник</label><select class="form-select" id="editSource" onclick="event.stopPropagation()"><option${project.source==='Сайт'?' selected':''}>Сайт</option><option${project.source==='Авито'?' selected':''}>Авито</option><option${project.source==='Telegram'?' selected':''}>Telegram</option><option${project.source==='Реклама'?' selected':''}>Реклама</option><option${project.source==='Знакомые'?' selected':''}>Знакомые</option></select></div>
                         </div>
-                        <div class="form-group"><label class="form-label" for="editDescription">Описание</label><textarea class="form-textarea" id="editDescription" onclick="event.stopPropagation()">${project.description || ''}</textarea></div>
+                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('editDescription', project.description || '', 'Описание проекта…')}</div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="saveProject()">Сохранить</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
+            bindRichEditor('editDescription');
         };
         
         window.saveProject = async function() {
@@ -392,9 +459,9 @@
                     pay_method: document.getElementById('editPayMethod').value,
                     adequacy: document.getElementById('editAdequacy').value,
                     source: document.getElementById('editSource').value,
-                    description: document.getElementById('editDescription').value,
+                    description: getDescValue('editDescription'),
                     urgent: project.urgent,
-                    progress: project.progress,
+                    progress: 0,
                     discount: project.discount,
                     discount_val: project.discount_val,
                     work_types: project.work_types,
@@ -406,18 +473,97 @@
             });
         };
         
-        // Add task modal
+        // Burger menu items for project kanban tasks
+        function buildProjectTaskMenu(t) {
+            const isPaused = t.column_status === 'Простой';
+            let items = '';
+            if (t.done) {
+                items += `<button type="button" class="task-action-btn restart" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();projectRestartTask('${t.id}')" title="Вернуть в работу" aria-label="Вернуть в работу"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 105.93-12.55L1 10"/></svg></button>`;
+            } else {
+                items += `<button type="button" class="task-action-btn done" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();projectCompleteTask('${t.id}')" title="Выполнено" aria-label="Выполнено"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg></button>`;
+                items += isPaused
+                    ? `<button type="button" class="task-action-btn play" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();projectPauseTask('${t.id}')" title="Продолжить" aria-label="Продолжить"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>`
+                    : `<button type="button" class="task-action-btn pause" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();projectPauseTask('${t.id}')" title="Пауза" aria-label="Пауза"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>`;
+            }
+            items += `<button type="button" class="task-action-btn gear" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();location.href='/pages/task.html?id=${t.id}'" title="Открыть" aria-label="Открыть"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>`;
+            items += `<button type="button" class="task-action-btn delete" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();projectDeleteTask('${t.id}')" title="Удалить" aria-label="Удалить"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
+            return items;
+        }
+
+        window.projectCompleteTask = async function(id) {
+            const doneCol = taskColumns.find(c => /готов|done|выполн/i.test(c.name)) || taskColumns[taskColumns.length - 1];
+            try {
+                await CRM.updateTask(id, { done: true, column_status: doneCol?.name || 'Готово' });
+                showToast('Задача выполнена', 'success');
+                setTimeout(() => location.reload(), 400);
+            } catch (e) { showToast('Ошибка', 'error'); }
+        };
+        window.projectRestartTask = async function(id) {
+            const workCol = taskColumns.find(c => /работ/i.test(c.name)) || taskColumns[0];
+            try {
+                await CRM.updateTask(id, { done: false, column_status: workCol?.name || 'В работе' });
+                showToast('Задача в работе', 'success');
+                setTimeout(() => location.reload(), 400);
+            } catch (e) { showToast('Ошибка', 'error'); }
+        };
+        window.projectPauseTask = async function(id) {
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            const pauseCol = taskColumns.find(c => /прост/i.test(c.name));
+            const workCol = taskColumns.find(c => /работ/i.test(c.name)) || taskColumns[0];
+            const newStatus = task.column_status === (pauseCol?.name || 'Простой')
+                ? (workCol?.name || 'В работе')
+                : (pauseCol?.name || 'Простой');
+            try {
+                await CRM.updateTask(id, { column_status: newStatus });
+                showToast('Статус: ' + newStatus, 'success');
+                setTimeout(() => location.reload(), 400);
+            } catch (e) { showToast('Ошибка', 'error'); }
+        };
+        window.projectDeleteTask = function(id) {
+            confirmDelete('Удалить задачу?', async () => {
+                try {
+                    await API.deleteTask(id);
+                    showToast('Задача удалена', 'success');
+                    setTimeout(() => location.reload(), 400);
+                } catch (e) { showToast('Ошибка', 'error'); }
+            });
+        };
+
+        // Add task modal — same fields as on Tasks page
         window.showAddTaskModal = function() {
             const overlay = document.getElementById('modalOverlay');
+            const currentUser = API.getCurrentUser();
+            const names = teamUsers.length ? teamUsers.map(u => u.name) : ['Костя', 'Максим', 'Андрей'];
+            const personOpts = names.map(p => `<option${currentUser && currentUser.name === p ? ' selected' : ''}>${p}</option>`).join('');
+            const defaultStatus = taskColumns[0]?.name || 'Ожидает';
+            const statusOpts = taskColumns.map(c =>
+                `<option value="${c.name}"${c.name === defaultStatus ? ' selected' : ''}>${c.name}</option>`
+            ).join('');
+
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
                     <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('newTaskDesc', '', 'Подробности задачи…')}</div>
+                        <div class="form-group"><label class="form-label">Проект</label><input type="text" class="form-input" value="${project.client} — ${project.name}" readonly style="opacity:0.7;cursor:not-allowed;"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newTaskPerson">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
-                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newTaskTime">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPerson">Исполнитель</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()">${personOpts}</select></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPriority">Приоритет</label>
+                                <select class="form-select" id="newTaskPriority" onclick="event.stopPropagation()">
+                                    <option value="low">Низкий</option>
+                                    <option value="medium" selected>Средний</option>
+                                    <option value="high">Высокий</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="newTaskStatus">Статус</label><select class="form-select" id="newTaskStatus" onclick="event.stopPropagation()">${statusOpts}</select></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="newTaskDate">Начало</label><input type="datetime-local" class="form-input" id="newTaskDate" value="${todayDatetimeLocal()}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="newTaskDateEnd" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addTask()">Создать</button></div>
@@ -425,6 +571,7 @@
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
+            bindRichEditor('newTaskDesc');
         };
         
         window.addTask = async function() {
@@ -435,15 +582,20 @@
                     { id: 'newTaskName', required: true, message: 'Введите название' }
                 ])) return;
                 const name = document.getElementById('newTaskName').value.trim();
+                const column_status = document.getElementById('newTaskStatus').value;
+                const doneCol = taskColumns.find(c => /готов|done|выполн/i.test(c.name));
                 
                 await CRM.addTask({
                     project_id: projectId,
                     name: name,
-                    column_status: 'Ожидает',
+                    description: getDescValue('newTaskDesc'),
+                    column_status: column_status,
                     person: document.getElementById('newTaskPerson').value,
-                    date: document.getElementById('newTaskDate').value || '—',
-                    time: document.getElementById('newTaskTime').value || '',
-                    done: false,
+                    priority: document.getElementById('newTaskPriority').value,
+                    date: document.getElementById('newTaskDate').value || todayDatetimeLocal(),
+                    date_end: document.getElementById('newTaskDateEnd').value || '',
+                    time: '',
+                    done: doneCol ? column_status === doneCol.name : false,
                     urgent: false,
                     hashtags: []
                 });

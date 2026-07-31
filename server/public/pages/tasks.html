@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Задачи — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/style.css?v=27">
     <style>
-        .task-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px; transition: all 0.15s; }
+        .task-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px; transition: all 0.15s; overflow: visible; }
         .task-card:hover { box-shadow: var(--shadow-sm); }
         .task-card.done { opacity: 0.6; }
         .task-card.done .task-name { text-decoration: line-through; color: var(--gray-400); }
@@ -27,12 +27,16 @@
         .activity-time { font-size: 0.75rem; color: var(--gray-400); margin-top: 2px; }
         .layout-2col { display: grid; grid-template-columns: 1fr 350px; gap: 24px; }
         @media (max-width: 1200px) { .layout-2col { grid-template-columns: 1fr; } }
-        .task-actions { display: flex; gap: 4px; align-items: center; position: relative; }
+        .task-actions {
+            display: flex; gap: 4px; align-items: center; position: relative;
+            flex-shrink: 0; z-index: 5;
+        }
         .task-action-btn {
             width: 32px; height: 32px; border-radius: var(--radius-md);
             display: flex; align-items: center; justify-content: center;
             border: 1px solid var(--gray-200); background: var(--white);
             color: var(--gray-500); cursor: pointer; transition: all 0.15s;
+            flex-shrink: 0;
         }
         .task-action-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
         .task-action-btn.done:hover { border-color: var(--success); color: var(--success); background: var(--success-light); }
@@ -45,25 +49,30 @@
         .task-action-btn.clone:hover { border-color: var(--info); color: var(--info); background: var(--info-light); }
         .task-action-btn.delete:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-light); }
         .task-action-btn.unparent { font-size: 0.8rem; font-weight: 700; }
-        .task-action-btn.task-menu-btn { border-color: transparent; color: var(--gray-500); }
-        .task-action-btn.task-menu-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
-        .task-menu-dropdown {
-            display: none; position: absolute; right: 0; top: calc(100% + 4px);
-            background: var(--white); border: 1px solid var(--gray-200);
-            border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
-            z-index: 300; min-width: 180px; padding: 4px;
+        .task-action-btn.task-menu-btn { border-color: transparent; color: var(--gray-500); position: relative; z-index: 2; }
+        .task-action-btn.task-menu-btn:hover,
+        .task-actions.open .task-action-btn.task-menu-btn {
+            border-color: var(--primary); color: var(--primary); background: var(--primary-light);
         }
-        .task-menu-dropdown.show { display: block; }
-        .task-menu-item {
-            display: flex; align-items: center; gap: 8px;
-            padding: 8px 12px; font-size: 0.82rem; color: var(--gray-700);
-            border-radius: var(--radius-sm); cursor: pointer; transition: background 0.1s;
+        /* Slide-out tray to the LEFT of the burger */
+        .task-menu-tray {
+            display: flex; align-items: center; gap: 4px;
+            position: absolute; right: calc(100% + 4px); top: 50%;
+            transform: translateY(-50%) translateX(12px) scaleX(0.85);
+            transform-origin: right center;
+            opacity: 0; pointer-events: none;
+            padding: 4px; background: var(--white);
+            border: 1px solid var(--gray-200); border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg); z-index: 300;
+            transition: opacity 0.2s ease, transform 0.25s ease;
             white-space: nowrap;
         }
-        .task-menu-item:hover { background: var(--primary-light); color: var(--primary); }
-        .task-menu-item.danger:hover { background: var(--danger-light); color: var(--danger); }
-        .task-menu-item svg { flex-shrink: 0; }
-        .task-menu-sep { height: 1px; background: var(--gray-100); margin: 4px 0; }
+        .task-actions.open .task-menu-tray {
+            opacity: 1; pointer-events: auto;
+            transform: translateY(-50%) translateX(0) scaleX(1);
+        }
+        .task-menu-tray .task-action-btn { width: 30px; height: 30px; }
+        .kanban-card { overflow: visible; position: relative; }
         .task-card.paused { border-left: 3px solid var(--warning); }
     </style>
 </head>
@@ -71,9 +80,9 @@
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=8"></script>
-    <script src="/assets/js/app.js?v=8"></script>
-    <script src="/assets/js/crm-data.js?v=8"></script>
+    <script src="/assets/js/api.js?v=17"></script>
+    <script src="/assets/js/app.js?v=27"></script>
+    <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -114,9 +123,30 @@
         if (contentWrapper) contentWrapper.classList.add('full-width');
         await CRM.load();
 
-        let currentFilter = 'all';
-        let currentTimeFilter = 'all';
-        let currentPersonFilter = 'all';
+        // Per-user filter persistence: saved to localStorage on every change
+        const _filterUser = (API.getCurrentUser() && API.getCurrentUser().name) || 'guest';
+        const _filterKey = 'crm_task_filters_' + _filterUser;
+
+        function loadSavedFilters() {
+            try { return JSON.parse(localStorage.getItem(_filterKey)) || {}; } catch (e) { return {}; }
+        }
+        function saveFilters() {
+            try {
+                localStorage.setItem(_filterKey, JSON.stringify({
+                    status: currentFilter,
+                    time: currentTimeFilter,
+                    person: currentPersonFilter,
+                    project: currentProjectFilter,
+                    view: currentTaskView
+                }));
+            } catch (e) {}
+        }
+
+        const _saved = loadSavedFilters();
+        let currentFilter = _saved.status || 'all';
+        let currentTimeFilter = _saved.time || 'all';
+        let currentPersonFilter = _saved.person || 'all';
+        let currentProjectFilter = _saved.project || 'all';
         let taskColumns = [];
 
         // Load task columns
@@ -153,27 +183,100 @@
             personOptions += '<option value="Максим"' + (currentPersonFilter === 'Максим' ? ' selected' : '') + '>Максим</option>';
             personOptions += '<option value="Андрей"' + (currentPersonFilter === 'Андрей' ? ' selected' : '') + '>Андрей</option>';
 
+            // Project filter: text input with live search + dropdown of all projects
+            const selectedProject = currentProjectFilter !== 'all' ? CRM.getProject(currentProjectFilter) : null;
+            const projectLabel = selectedProject ? selectedProject.client + ' — ' + selectedProject.name : '';
+
             let html = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">';
-            html += '<div style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Статус:</span><select class="form-select" style="width:auto;min-width:140px;padding:6px 32px 6px 10px;font-size:0.8rem;" onchange="filterTasks(this.value)">' + statusOptions + '</select></div>';
+            html += '<div id="statusFilterWrap" style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Статус:</span><select class="form-select" style="width:auto;min-width:140px;padding:6px 32px 6px 10px;font-size:0.8rem;" onchange="filterTasks(this.value)">' + statusOptions + '</select></div>';
             html += '<div style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Время:</span><select class="form-select" style="width:auto;min-width:140px;padding:6px 32px 6px 10px;font-size:0.8rem;" onchange="filterTime(this.value)">' + timeOptions + '</select></div>';
             html += '<div style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Исполнитель:</span><select class="form-select" style="width:auto;min-width:150px;padding:6px 32px 6px 10px;font-size:0.8rem;" onchange="filterByPerson(this.value)">' + personOptions + '</select></div>';
+            html += '<div style="display:flex;align-items:center;gap:6px;"><span class="text-sm text-muted">Проект:</span><div class="hashtag-search-wrapper" style="width:200px;">'
+                + '<input type="text" class="form-input" id="projectFilterInput" value="' + projectLabel.replace(/"/g, '&quot;') + '" placeholder="Все проекты" autocomplete="off" style="padding:6px 28px 6px 10px;font-size:0.8rem;">'
+                + '<button class="hashtag-arrow" onclick="toggleProjectFilterDropdown(event)" aria-label="Показать все проекты"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button>'
+                + '<div class="hashtag-dropdown" id="projectFilterDropdown"></div>'
+                + '</div></div>';
             html += '</div>';
             container.innerHTML = html;
+            initProjectFilterSearch();
         }
+
+        // Searchable project filter: typing filters the list, selecting applies the filter
+        function initProjectFilterSearch() {
+            const input = document.getElementById('projectFilterInput');
+            const dropdown = document.getElementById('projectFilterDropdown');
+            if (!input || !dropdown) return;
+            const projects = CRM.getProjects();
+
+            window._showProjectFilterList = function(filter) {
+                const matches = filter
+                    ? projects.filter(p => (p.name + ' ' + p.client).toLowerCase().includes(filter.toLowerCase()))
+                    : projects;
+                let items = '<div class="hashtag-dropdown-item" data-project-id="all">Все проекты</div>';
+                items += matches.map(p =>
+                    `<div class="hashtag-dropdown-item" data-project-id="${p.id}" data-project-name="${p.client} — ${p.name}">${p.client} — ${p.name}</div>`
+                ).join('');
+                dropdown.innerHTML = items;
+                dropdown.classList.add('show');
+            };
+
+            input.addEventListener('focus', () => { window._showProjectFilterList(input.value.trim()); });
+            input.addEventListener('input', () => {
+                const val = input.value.trim();
+                if (!val && currentProjectFilter !== 'all') {
+                    currentProjectFilter = 'all';
+                    saveFilters();
+                    renderTasks();
+                }
+                window._showProjectFilterList(val);
+            });
+
+            dropdown.addEventListener('click', (e) => {
+                const item = e.target.closest('.hashtag-dropdown-item');
+                if (!item) return;
+                if (item.dataset.projectId === 'all') {
+                    currentProjectFilter = 'all';
+                    input.value = '';
+                } else {
+                    currentProjectFilter = item.dataset.projectId;
+                    input.value = item.dataset.projectName;
+                }
+                dropdown.classList.remove('show');
+                saveFilters();
+                renderTasks();
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('#projectFilterInput') && !e.target.closest('#projectFilterDropdown') && !e.target.closest('.hashtag-arrow')) {
+                    dropdown.classList.remove('show');
+                }
+            });
+        }
+
+        window.toggleProjectFilterDropdown = function(e) {
+            if (e) e.stopPropagation();
+            const dropdown = document.getElementById('projectFilterDropdown');
+            if (!dropdown) return;
+            if (dropdown.classList.contains('show')) dropdown.classList.remove('show');
+            else if (window._showProjectFilterList) window._showProjectFilterList('');
+        };
         renderTaskFilters();
         
         window.filterTasks = function(filter) {
             currentFilter = filter;
+            saveFilters();
             renderTasks();
         };
 
         window.filterTime = function(filter) {
             currentTimeFilter = filter;
+            saveFilters();
             renderTasks();
         };
 
         window.filterByPerson = function(filter) {
             currentPersonFilter = filter;
+            saveFilters();
             renderTasks();
         };
         
@@ -203,20 +306,23 @@
             }
         };
 
-        // Toggle task action menu dropdown
+        // Toggle task action tray — slides out to the left of the burger
         window.toggleTaskMenu = function(btn) {
-            const dropdown = btn.nextElementSibling;
-            if (!dropdown) return;
-            const isOpen = dropdown.classList.contains('show');
-            // Close all other menus first
-            document.querySelectorAll('.task-menu-dropdown.show').forEach(d => d.classList.remove('show'));
-            if (!isOpen) dropdown.classList.add('show');
+            const wrap = btn.closest('.task-actions');
+            if (!wrap) return;
+            const isOpen = wrap.classList.contains('open');
+            document.querySelectorAll('.task-actions.open').forEach(el => el.classList.remove('open'));
+            if (!isOpen) wrap.classList.add('open');
         };
 
-        // Close task menus on outside click
+        // Close task menus on outside click or after choosing an action
         document.addEventListener('click', function(e) {
+            if (e.target.closest('.task-menu-tray .task-action-btn')) {
+                document.querySelectorAll('.task-actions.open').forEach(el => el.classList.remove('open'));
+                return;
+            }
             if (!e.target.closest('.task-actions')) {
-                document.querySelectorAll('.task-menu-dropdown.show').forEach(d => d.classList.remove('show'));
+                document.querySelectorAll('.task-actions.open').forEach(el => el.classList.remove('open'));
             }
         });
 
@@ -285,11 +391,11 @@
                         column_status: column_status,
                         date: document.getElementById('editTaskDate').value || '',
                         date_end: document.getElementById('editTaskDateEnd').value || '',
-                        time: document.getElementById('editTaskTime').value || '',
+                        time: '',
                         done: done,
                         urgent: false,
                         priority: document.getElementById('editTaskPriority').value,
-                        description: document.getElementById('editTaskDesc').value.trim()
+                        description: getDescValue('editTaskDesc')
                     });
                     // Don't re-render list during editing — cache is already updated by CRM.updateTask
                     if (indicator) { indicator.textContent = 'Сохранено'; indicator.style.color = 'var(--success)'; }
@@ -301,13 +407,14 @@
         }
 
         function bindAutoSave() {
-            const fields = ['editTaskName', 'editTaskDesc', 'editTaskProject', 'editTaskPerson', 'editTaskPriority', 'editTaskStatus', 'editTaskDate', 'editTaskDateEnd', 'editTaskTime'];
+            const fields = ['editTaskName', 'editTaskDesc', 'editTaskProject', 'editTaskPerson', 'editTaskPriority', 'editTaskStatus', 'editTaskDate', 'editTaskDateEnd'];
             fields.forEach(id => {
                 const el = document.getElementById(id);
                 if (!el) return;
                 el.addEventListener('input', autoSaveTask);
                 el.addEventListener('change', autoSaveTask);
             });
+            bindRichEditor('editTaskDesc');
         }
 
         window.showEditTaskModal = function(taskId, cloneMode) {
@@ -337,7 +444,7 @@
                         <div class="modal-header"><h3 class="modal-title">Копировать задачу</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                         <div class="modal-body">
                             <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="editTaskDesc">Описание</label><textarea class="form-textarea" id="editTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${task.description || ''}</textarea></div>
+                            <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('editTaskDesc', task.description || '', 'Подробности задачи…')}</div>
                             <div class="form-group">
                                 <label class="form-label">Проект</label>
                                 <div class="hashtag-search-wrapper" style="width:100%;">
@@ -354,9 +461,8 @@
                                 <div class="form-group"><label class="form-label" for="editTaskStatus">Статус</label><select class="form-select" id="editTaskStatus" onclick="event.stopPropagation()">${statusOptions}</select></div>
                             </div>
                             <div class="form-row">
-                                <div class="form-group"><label class="form-label" for="editTaskDate">Дата начала</label><input type="date" class="form-input" id="editTaskDate" value="${task.date || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                                <div class="form-group"><label class="form-label" for="editTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="editTaskDateEnd" value="${task.date_end || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                                <div class="form-group"><label class="form-label" for="editTaskTime">Время</label><input type="time" class="form-input" id="editTaskTime" value="${task.time || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskDate">Начало</label><input type="datetime-local" class="form-input" id="editTaskDate" value="${toDatetimeLocalValue(task.date, task.time)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="editTaskDateEnd" value="${toDatetimeLocalValue(task.date_end)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                             </div>
                         </div>
                         <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTaskCopy('${taskId}')">Создать копию</button></div>
@@ -376,7 +482,7 @@
                         </div>
                         <div class="modal-body">
                             <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="editTaskDesc">Описание</label><textarea class="form-textarea" id="editTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${task.description || ''}</textarea></div>
+                            <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('editTaskDesc', task.description || '', 'Подробности задачи…')}</div>
                             <div class="form-group">
                                 <label class="form-label">Проект</label>
                                 <div class="hashtag-search-wrapper" style="width:100%;">
@@ -393,9 +499,8 @@
                                 <div class="form-group"><label class="form-label" for="editTaskStatus">Статус</label><select class="form-select" id="editTaskStatus" onclick="event.stopPropagation()">${statusOptions}</select></div>
                             </div>
                             <div class="form-row">
-                                <div class="form-group"><label class="form-label" for="editTaskDate">Дата начала</label><input type="date" class="form-input" id="editTaskDate" value="${task.date || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                                <div class="form-group"><label class="form-label" for="editTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="editTaskDateEnd" value="${task.date_end || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                                <div class="form-group"><label class="form-label" for="editTaskTime">Время</label><input type="time" class="form-input" id="editTaskTime" value="${task.time || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskDate">Начало</label><input type="datetime-local" class="form-input" id="editTaskDate" value="${toDatetimeLocalValue(task.date, task.time)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                                <div class="form-group"><label class="form-label" for="editTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="editTaskDateEnd" value="${toDatetimeLocalValue(task.date_end)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                             </div>
                         </div>
                         <div class="modal-footer" style="justify-content:center;"><span style="font-size:0.8rem;color:var(--gray-400);">Изменения сохраняются автоматически</span></div>
@@ -407,6 +512,7 @@
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
             initProjectSearch('editTaskProject', 'editTaskProjectDropdown');
+            if (cloneMode) bindRichEditor('editTaskDesc');
 
             // When edit modal closes, refresh the task list
             if (!cloneMode) {
@@ -441,13 +547,13 @@
                         name: document.getElementById('editTaskName').value.trim(),
                         column_status: document.getElementById('editTaskStatus').value,
                         person: document.getElementById('editTaskPerson').value,
-                        date: document.getElementById('editTaskDate').value || '',
+                        date: document.getElementById('editTaskDate').value || todayDatetimeLocal(),
                         date_end: document.getElementById('editTaskDateEnd').value || '',
-                        time: document.getElementById('editTaskTime').value || '',
+                        time: '',
                         done: false,
                         urgent: false,
                         priority: document.getElementById('editTaskPriority').value,
-                        description: document.getElementById('editTaskDesc').value.trim(),
+                        description: getDescValue('editTaskDesc'),
                         hashtags: []
                     });
                 } catch (err) {
@@ -486,11 +592,11 @@
                     column_status: column_status,
                     date: document.getElementById('editTaskDate').value || '',
                     date_end: document.getElementById('editTaskDateEnd').value || '',
-                    time: document.getElementById('editTaskTime').value || '',
+                    time: '',
                     done: done,
                     urgent: false,
                     priority: document.getElementById('editTaskPriority').value,
-                    description: document.getElementById('editTaskDesc').value.trim()
+                    description: getDescValue('editTaskDesc')
                 });
 
                 closeModal();
@@ -535,27 +641,26 @@
             }
         }
         
-        // Shared helper: build task action menu items HTML
+        // Shared helper: action buttons that slide out left from the burger
         function buildTaskMenuItems(t, isChild) {
             const isPaused = t.column_status === 'Простой';
             const isDone = t.done;
             let items = '';
             if (isDone) {
-                items += `<div class="task-menu-item" onclick="event.stopPropagation();restartTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 105.93-12.55L1 10"/></svg> Вернуть в работу</div>`;
+                items += `<button type="button" class="task-action-btn restart" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();restartTask('${t.id}')" title="Вернуть в работу" aria-label="Вернуть в работу"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 105.93-12.55L1 10"/></svg></button>`;
             } else {
-                items += `<div class="task-menu-item" onclick="event.stopPropagation();toggleTaskDone('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg> Выполнено</div>`;
+                items += `<button type="button" class="task-action-btn done" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskDone('${t.id}')" title="Выполнено" aria-label="Выполнено"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg></button>`;
                 items += isPaused
-                    ? `<div class="task-menu-item" onclick="event.stopPropagation();toggleTaskPause('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Продолжить</div>`
-                    : `<div class="task-menu-item" onclick="event.stopPropagation();toggleTaskPause('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Пауза</div>`;
+                    ? `<button type="button" class="task-action-btn play" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskPause('${t.id}')" title="Продолжить" aria-label="Продолжить"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>`
+                    : `<button type="button" class="task-action-btn pause" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskPause('${t.id}')" title="Пауза" aria-label="Пауза"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>`;
             }
-            items += `<div class="task-menu-item" onclick="event.stopPropagation();showEditTaskModal('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg> Настройки</div>`;
-            items += `<div class="task-menu-item" onclick="event.stopPropagation();showAddSubtaskModal('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Подзадача</div>`;
-            items += `<div class="task-menu-item" onclick="event.stopPropagation();cloneTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Копировать</div>`;
+            items += `<button type="button" class="task-action-btn gear" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();location.href='/pages/task.html?id=${t.id}'" title="Открыть задачу" aria-label="Открыть задачу"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>`;
+            items += `<button type="button" class="task-action-btn add-child" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();showAddNestedTask('${t.id}')" title="Вложенная задача" aria-label="Вложенная задача"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>`;
+            items += `<button type="button" class="task-action-btn clone" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();cloneTask('${t.id}')" title="Копировать" aria-label="Копировать"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>`;
             if (isChild) {
-                items += `<div class="task-menu-item" onclick="event.stopPropagation();unparentTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5,12 12,5 19,12"/></svg> Открепить</div>`;
+                items += `<button type="button" class="task-action-btn unparent" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();unparentTask('${t.id}')" title="Открепить" aria-label="Открепить"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5,12 12,5 19,12"/></svg></button>`;
             }
-            items += `<div class="task-menu-sep"></div>`;
-            items += `<div class="task-menu-item danger" onclick="event.stopPropagation();deleteTask('${t.id}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Удалить</div>`;
+            items += `<button type="button" class="task-action-btn delete" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();deleteTask('${t.id}')" title="Удалить" aria-label="Удалить"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
             return items;
         }
 
@@ -568,6 +673,11 @@
                 tasks = tasks.filter(t => t.person === currentPersonFilter);
             }
 
+            // Project filter
+            if (currentProjectFilter !== 'all') {
+                tasks = tasks.filter(t => t.project_id === currentProjectFilter);
+            }
+
             // Time filter
             const today = new Date();
             today.setHours(0,0,0,0);
@@ -575,19 +685,19 @@
             const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
 
             if (currentTimeFilter === 'today') {
-                tasks = tasks.filter(t => t.date === today.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === today.toISOString().split('T')[0]);
             } else if (currentTimeFilter === 'tomorrow') {
-                tasks = tasks.filter(t => t.date === tomorrow.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === tomorrow.toISOString().split('T')[0]);
             } else if (currentTimeFilter === 'week') {
                 tasks = tasks.filter(t => {
                     if (!t.date) return false;
-                    const d = new Date(t.date);
+                    const d = new Date(datePart(t.date));
                     return d >= today && d <= weekEnd;
                 });
             } else if (currentTimeFilter === 'overdue') {
                 tasks = tasks.filter(t => {
                     if (!t.date || t.done) return false;
-                    return new Date(t.date) < today;
+                    return new Date(datePart(t.date)) < today;
                 });
             }
             
@@ -613,6 +723,13 @@
                 }
             });
             
+            function statusColorFor(name) {
+                const col = taskColumns.find(c => c.name === name);
+                const map = { blue: '#3B82F6', yellow: '#F59E0B', green: '#10B981', gray: '#9CA3AF', red: '#EF4444', purple: '#8B5CF6', pink: '#EC4899', orange: '#F97316', teal: '#14B8A6', indigo: '#6366F1', lime: '#84CC16', cyan: '#06B6D4' };
+                const c = col && col.color;
+                return map[c] || (c && String(c).startsWith('#') ? c : '#9CA3AF');
+            }
+
             function renderTaskCard(t, isChild) {
                 const project = CRM.getProject(t.project_id);
                 const subtasks = allSubtasks[t.id] || [];
@@ -621,34 +738,32 @@
                 const isPaused = t.column_status === 'Простой';
                 const isDone = t.done;
                 const menuItems = buildTaskMenuItems(t, isChild);
+                const statusHex = statusColorFor(t.column_status);
 
-                const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
-                const priorityLabel = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
-                const dateRange = t.date && t.date_end && t.date !== t.date_end
-                    ? t.date + ' — ' + t.date_end
-                    : t.date || '';
+                const dateRange = formatTaskDateRange(t);
 
-                let html = `<div class="task-card${isDone ? ' done' : ''}${isChild ? ' child' : ''}${isPaused ? ' paused' : ''}" data-task-id="${t.id}" draggable="true">
+                let html = `<div class="task-card${isDone ? ' done' : ''}${isChild ? ' child' : ''}" data-task-id="${t.id}" draggable="true" style="border-left-color:${statusHex};" onclick="if(!event.target.closest('.task-actions') && !event.target.closest('a') && !event.target.closest('input') && !event.target.closest('button') && !event.target.closest('.desc-clamp-wrap'))location.href='/pages/task.html?id=${t.id}'">
                     <div style="display:flex;align-items:flex-start;gap:12px;">
-                        <div style="flex:1;">
+                        <div style="flex:1;min-width:0;">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                                 <div style="flex:1;min-width:0;">
-                                    <div class="task-name" style="font-weight:600;font-size:0.95rem;${isDone ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
-                                    ${t.description ? '<div style="font-size:0.82rem;color:var(--gray-500);margin-top:3px;line-height:1.4;white-space:pre-wrap;">' + t.description + '</div>' : ''}
+                                    <div class="task-title-row">
+                                        ${renderPriorityMark(t.priority)}
+                                        <div class="task-name" style="font-weight:600;font-size:0.95rem;${isDone ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${String(t.name || '').replace(/</g,'&lt;')}</div>
+                                    </div>
+                                    ${t.description ? renderDescClamp(t.description, { lines: 3, id: 'dlist_' + t.id }) : ''}
                                     <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:0.8rem;color:var(--gray-500);flex-wrap:wrap;">
                                         ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" style="color:var(--primary);text-decoration:none;">' + project.name + '</a><span>·</span>' : ''}
                                         <span>${t.person}</span>
-                                        <span>·</span>
-                                        <span>${dateRange} ${t.time || ''}</span>
-                                        <span title="${priorityLabel[t.priority] || 'Средний'}">${priorityEmoji[t.priority] || '🟡'}</span>
+                                        ${dateRange ? '<span>·</span><span>' + dateRange + '</span>' : ''}
                                         ${isPaused ? '<span class="badge badge-warning" style="font-size:0.65rem;">ПРОСТОЙ</span>' : ''}
                                         ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + ' подзадач</span>' : ''}
                                     </div>
                                     ${subtasks.length > 0 ? '<div style="margin-top:4px;font-size:0.75rem;color:var(--gray-400);">Чеклист: ' + doneSubtasks + '/' + subtasks.length + '</div>' : ''}
                                 </div>
                                 <div class="task-actions">
+                                    <div class="task-menu-tray">${menuItems}</div>
                                     <button class="task-action-btn task-menu-btn" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskMenu(this)" title="Действия" aria-label="Меню действий"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-                                    <div class="task-menu-dropdown">${menuItems}</div>
                                 </div>
                             </div>
                             ${subtasks.length > 0 ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--gray-100);">' + subtasks.map(s => `
@@ -696,6 +811,8 @@
             const btnList = document.getElementById('viewList');
             const btnKanban = document.getElementById('viewKanban');
 
+            const statusWrap = document.getElementById('statusFilterWrap');
+
             if (view === 'kanban') {
                 listView.classList.add('hidden');
                 kanbanView.classList.remove('hidden');
@@ -705,6 +822,13 @@
                 btnList.style.background = '';
                 btnList.style.color = '';
                 btnList.style.borderColor = '';
+                // Kanban has no status filter: columns already group by status
+                if (statusWrap) {
+                    statusWrap.style.display = 'none';
+                    const sel = statusWrap.querySelector('select');
+                    if (sel) sel.value = 'all';
+                }
+                currentFilter = 'all';
                 renderTaskKanban();
             } else {
                 listView.classList.remove('hidden');
@@ -715,7 +839,9 @@
                 btnKanban.style.background = '';
                 btnKanban.style.color = '';
                 btnKanban.style.borderColor = '';
+                if (statusWrap) statusWrap.style.display = 'flex';
             }
+            saveFilters();
         };
 
         function renderTaskKanban() {
@@ -728,18 +854,22 @@
             if (currentPersonFilter !== 'all') {
                 tasks = tasks.filter(t => t.person === currentPersonFilter);
             }
+            // Apply project filter
+            if (currentProjectFilter !== 'all') {
+                tasks = tasks.filter(t => t.project_id === currentProjectFilter);
+            }
             // Apply time filter
             const today = new Date(); today.setHours(0,0,0,0);
             const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
             const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
             if (currentTimeFilter === 'today') {
-                tasks = tasks.filter(t => t.date === today.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === today.toISOString().split('T')[0]);
             } else if (currentTimeFilter === 'tomorrow') {
-                tasks = tasks.filter(t => t.date === tomorrow.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === tomorrow.toISOString().split('T')[0]);
             } else if (currentTimeFilter === 'week') {
-                tasks = tasks.filter(t => { if (!t.date) return false; const d = new Date(t.date); return d >= today && d <= weekEnd; });
+                tasks = tasks.filter(t => { if (!t.date) return false; const d = new Date(datePart(t.date)); return d >= today && d <= weekEnd; });
             } else if (currentTimeFilter === 'overdue') {
-                tasks = tasks.filter(t => { if (!t.date || t.done) return false; return new Date(t.date) < today; });
+                tasks = tasks.filter(t => { if (!t.date || t.done) return false; return new Date(datePart(t.date)) < today; });
             }
 
             const colorHexMap = { blue: '#3B82F6', yellow: '#F59E0B', green: '#10B981', gray: '#9CA3AF', red: '#EF4444', purple: '#8B5CF6', pink: '#EC4899', orange: '#F97316', teal: '#14B8A6', indigo: '#6366F1', lime: '#84CC16', cyan: '#06B6D4' };
@@ -752,22 +882,24 @@
                 html += `<div class="kanban-column"><div class="kanban-column-header"><div class="kanban-column-title"><span class="status-dot" style="background:${hex}"></span> ${col.name} <span class="kanban-count">${colTasks.length}</span></div></div><div class="kanban-column-body" data-column="${col.name}">`;
                 colTasks.forEach(t => {
                     const project = CRM.getProject(t.project_id);
-                    const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
                     const children = tasks.filter(ch => ch.parent_id === t.id);
-                    html += `<div class="kanban-card${t.done ? ' done' : ''}" draggable="true" data-task-id="${t.id}" style="${t.column_status === 'Простой' ? 'border-left:3px solid var(--warning);' : ''}">
-                        <div style="display:flex;justify-content:space-between;align-items:start;">
-                            <div class="kanban-card-title" style="${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${t.name}</div>
-                            <span title="${t.priority || 'medium'}">${priorityEmoji[t.priority] || '🟡'}</span>
+                    const range = formatTaskDateRange(t);
+                    html += `<div class="kanban-card${t.done ? ' done' : ''}" draggable="true" data-task-id="${t.id}" style="border-left-color:${hex};" onclick="if(!event.target.closest('.task-actions') && !event.target.closest('.desc-clamp-wrap'))location.href='/pages/task.html?id=${t.id}'">
+                        <div style="display:flex;justify-content:space-between;align-items:start;gap:6px;">
+                            <div class="task-title-row" style="flex:1;">
+                                ${renderPriorityMark(t.priority)}
+                                <div class="kanban-card-title" style="${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${String(t.name || '').replace(/</g,'&lt;')}</div>
+                            </div>
                         </div>
-                        ${t.description ? '<div style="font-size:0.75rem;color:var(--gray-500);margin:4px 0;white-space:pre-wrap;">' + t.description.slice(0,80) + (t.description.length > 80 ? '...' : '') + '</div>' : ''}
-                        <div class="kanban-card-client">${t.person}${t.date ? ' · ' + t.date : ''}${t.time ? ' ' + t.time : ''}</div>
+                        ${t.description ? renderDescClamp(t.description, { lines: 2, id: 'dkan_' + t.id }) : ''}
+                        <div class="kanban-card-client">${t.person || ''}${range ? ' · ' + range : ''}</div>
                         ${project ? '<div style="font-size:0.7rem;color:var(--primary);margin-top:2px;">' + project.name + '</div>' : ''}
                         ${children.length > 0 ? '<span class="task-nest-badge">' + children.length + ' подзадач</span>' : ''}
                         <div class="kanban-card-footer">
                             <span class="kanban-card-status"><span class="status-dot" style="background:${hex}"></span> ${col.name}</span>
-                            <div class="task-actions" style="display:flex;gap:2px;">
-                                <button class="btn btn-ghost btn-sm task-menu-btn" draggable="false" ondragstart="event.preventDefault()" style="padding:2px 6px;font-size:0.7rem;" onclick="event.stopPropagation();toggleTaskMenu(this)" title="Действия">☰</button>
-                                <div class="task-menu-dropdown">${buildTaskMenuItems(t, false)}</div>
+                            <div class="task-actions" onclick="event.stopPropagation()">
+                                <div class="task-menu-tray">${buildTaskMenuItems(t, false)}</div>
+                                <button class="task-action-btn task-menu-btn" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskMenu(this)" title="Действия" aria-label="Меню действий"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
                             </div>
                         </div>
                     </div>`;
@@ -779,62 +911,70 @@
             initTaskKanbanDragDrop();
         }
 
-        function initTaskKanbanDragDrop() {
-            const cards = document.querySelectorAll('#taskKanbanView .kanban-card[draggable]');
-            const columns = document.querySelectorAll('#taskKanbanView .kanban-column-body');
+        function setDndActive(on) {
+            document.body.classList.toggle('dnd-active', !!on);
+        }
 
-            cards.forEach(card => {
-                card.addEventListener('dragstart', function(e) {
-                    this.classList.add('dragging');
+        function initTaskKanbanDragDrop() {
+            const board = document.getElementById('taskKanbanView');
+            if (!board) return;
+
+            board.querySelectorAll('.kanban-card[draggable="true"]').forEach(card => {
+                card.ondragstart = (e) => {
+                    // Prefer innermost card if nested somehow
+                    if (e.target.closest('.kanban-card') !== card) return;
+                    setDndActive(true);
+                    card.classList.add('dragging');
                     e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', this.dataset.taskId);
-                });
-                card.addEventListener('dragend', function() {
-                    this.classList.remove('dragging');
-                    document.querySelectorAll('#taskKanbanView .kanban-column-body').forEach(col => {
+                    e.dataTransfer.setData('text/plain', card.dataset.taskId || '');
+                };
+                card.ondragend = () => {
+                    setDndActive(false);
+                    card.classList.remove('dragging');
+                    board.querySelectorAll('.kanban-column-body').forEach(col => {
                         col.style.background = '';
                         col.style.minHeight = '';
                     });
-                });
+                };
             });
 
-            columns.forEach(col => {
-                col.addEventListener('dragover', function(e) {
+            board.querySelectorAll('.kanban-column-body').forEach(col => {
+                col.ondragover = (e) => {
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
-                    this.style.background = 'rgba(99,102,241,0.08)';
-                    this.style.minHeight = '100px';
-                });
-                col.addEventListener('dragleave', function() {
-                    this.style.background = '';
-                    this.style.minHeight = '';
-                });
-                col.addEventListener('drop', async function(e) {
-                    e.preventDefault();
-                    this.style.background = '';
-                    this.style.minHeight = '';
-
-                    const taskId = e.dataTransfer.getData('text/plain');
-                    const newColumn = this.dataset.column;
-
-                    if (taskId && newColumn) {
-                        try {
-                            const task = CRM.getTasks().find(t => t.id === taskId);
-                            if (task && task.column_status !== newColumn) {
-                                await CRM.updateTask(taskId, {
-                                    column_status: newColumn,
-                                    done: newColumn === 'Готово'
-                                });
-                                showToast('Статус: ' + newColumn, 'success');
-                                await CRM.load();
-                                renderTaskKanban();
-                                renderTasks();
-                            }
-                        } catch (err) {
-                            showToast('Ошибка', 'error');
-                        }
+                    col.style.background = 'rgba(99,102,241,0.08)';
+                    col.style.minHeight = '100px';
+                };
+                col.ondragleave = (e) => {
+                    if (!col.contains(e.relatedTarget)) {
+                        col.style.background = '';
+                        col.style.minHeight = '';
                     }
-                });
+                };
+                col.ondrop = async (e) => {
+                    e.preventDefault();
+                    setDndActive(false);
+                    col.style.background = '';
+                    col.style.minHeight = '';
+                    const taskId = e.dataTransfer.getData('text/plain');
+                    const newColumn = col.dataset.column;
+                    if (!taskId || !newColumn) return;
+                    try {
+                        const task = CRM.getTasks().find(t => t.id === taskId);
+                        if (task && task.column_status !== newColumn) {
+                            await CRM.updateTask(taskId, {
+                                column_status: newColumn,
+                                done: /готов|выполн|done/i.test(newColumn)
+                            });
+                            showToast('Статус: ' + newColumn, 'success');
+                            await CRM.load();
+                            renderTaskKanban();
+                            if (currentTaskView === 'list') renderTasks();
+                        }
+                    } catch (err) {
+                        showToast(err.message || 'Ошибка', 'error');
+                    }
+                };
             });
         }
         
@@ -876,19 +1016,38 @@
             }
         }
         
+        // Restore the saved view mode (list/kanban) for this user
+        if (_saved.view === 'kanban') switchTaskView('kanban');
+
         await renderTasks();
         await loadActivity();
+        
+        // Realtime refresh hook (called by app.js poller when data changes)
+        window.refreshPageData = async function() {
+            await CRM.load();
+            renderTasks();
+            loadActivity();
+        };
+        
+        // Deep link from notifications: /pages/tasks.html?task=ID opens the task
+        const taskParam = new URLSearchParams(location.search).get('task');
+        if (taskParam && CRM.getTasks().find(t => t.id === taskParam)) {
+            location.replace('/pages/task.html?id=' + encodeURIComponent(taskParam));
+            return;
+        }
         
         window.showNewTaskModal = function() {
             const overlay = document.getElementById('modalOverlay');
             const projects = CRM.getProjects();
+            const currentUser = API.getCurrentUser();
+            const personOpts = ['Костя', 'Максим', 'Андрей'].map(p => `<option${currentUser && currentUser.name === p ? ' selected' : ''}>${p}</option>`).join('');
 
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
                     <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                        <div class="form-group"><label class="form-label" for="newTaskDesc">Описание</label><textarea class="form-textarea" id="newTaskDesc" placeholder="Подробности задачи..." rows="3" style="resize:vertical;min-height:60px;" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></textarea></div>
+                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('newTaskDesc', '', 'Подробности задачи…')}</div>
                         <div class="form-group">
                             <label class="form-label">Проект</label>
                             <div class="hashtag-search-wrapper" style="width:100%;">
@@ -898,7 +1057,7 @@
                             </div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newTaskPerson">Исполнитель</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPerson">Исполнитель</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()">${personOpts}</select></div>
                             <div class="form-group">
                                 <label class="form-label" for="newTaskPriority">Приоритет</label>
                                 <select class="form-select" id="newTaskPriority" onclick="event.stopPropagation()">
@@ -909,9 +1068,8 @@
                             </div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата начала</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newTaskDateEnd">Дата окончания</label><input type="date" class="form-input" id="newTaskDateEnd" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newTaskTime">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDate">Начало</label><input type="datetime-local" class="form-input" id="newTaskDate" value="${todayDatetimeLocal()}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="newTaskDateEnd" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                     </div>
                     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
@@ -920,6 +1078,66 @@
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
             initProjectSearch('newTaskProject', 'newTaskProjectDropdown');
+            bindRichEditor('newTaskDesc');
+        };
+
+        window.showAddNestedTask = function(parentId) {
+            const parent = CRM.getTasks().find(t => t.id === parentId);
+            if (!parent) return;
+            const overlay = document.getElementById('modalOverlay');
+            const personOpts = ['Костя', 'Максим', 'Андрей'].map(p =>
+                `<option${(parent.person || '') === p ? ' selected' : ''}>${p}</option>`
+            ).join('');
+            overlay.innerHTML = `
+                <div class="modal" onclick="event.stopPropagation()">
+                    <div class="modal-header"><h3 class="modal-title">Вложенная задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-body">
+                        <p class="text-sm text-muted" style="margin:0 0 12px;">Родитель: <strong>${String(parent.name || '').replace(/</g,'&lt;')}</strong></p>
+                        <div class="form-group"><label class="form-label" for="nestTaskName">Название *</label><input type="text" class="form-input" id="nestTaskName" placeholder="Что сделать?"></div>
+                        <div class="form-group"><label class="form-label" for="nestTaskPerson">Исполнитель</label><select class="form-select" id="nestTaskPerson">${personOpts}</select></div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="nestTaskDate">Начало</label><input type="datetime-local" class="form-input" id="nestTaskDate" value="${todayDatetimeLocal()}"></div>
+                            <div class="form-group"><label class="form-label" for="nestTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="nestTaskDateEnd"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createNestedTask('${parentId}')">Создать</button></div>
+                </div>`;
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+            setTimeout(() => document.getElementById('nestTaskName')?.focus(), 50);
+        };
+
+        window.createNestedTask = async function(parentId) {
+            const parent = CRM.getTasks().find(t => t.id === parentId);
+            const name = (document.getElementById('nestTaskName')?.value || '').trim();
+            if (!name) { showToast('Введите название', 'error'); return; }
+            try {
+                await CRM.addTask({
+                    project_id: parent?.project_id || '',
+                    name,
+                    column_status: parent?.column_status || 'Ожидает',
+                    person: document.getElementById('nestTaskPerson')?.value || parent?.person || 'Костя',
+                    date: document.getElementById('nestTaskDate')?.value || todayDatetimeLocal(),
+                    date_end: document.getElementById('nestTaskDateEnd')?.value || '',
+                    time: '',
+                    parent_id: parentId,
+                    priority: 'medium',
+                    done: false,
+                    urgent: false,
+                    hashtags: [],
+                    description: ''
+                });
+                // Ensure parent is epic-ish for hierarchy visibility
+                if (parent && !parent.is_epic && !parent.parent_id) {
+                    try { await CRM.updateTask(parentId, { is_epic: true }); } catch (e) {}
+                }
+                closeModal();
+                showToast('Вложенная задача создана', 'success');
+                await CRM.load();
+                await renderTasks();
+            } catch (err) {
+                showToast(err.message || 'Ошибка', 'error');
+            }
         };
         
         window.showAddSubtaskModal = function(taskId) {
@@ -953,10 +1171,9 @@
                 const projectId = (projectInput && projectInput.dataset.selectedId) ? projectInput.dataset.selectedId : '';
                 const person = document.getElementById('newTaskPerson').value;
                 const priority = document.getElementById('newTaskPriority').value;
-                const dateStart = document.getElementById('newTaskDate').value || '';
+                const dateStart = document.getElementById('newTaskDate').value || todayDatetimeLocal();
                 const dateEnd = document.getElementById('newTaskDateEnd').value || '';
-                const time = document.getElementById('newTaskTime').value || '';
-                const description = document.getElementById('newTaskDesc').value.trim();
+                const description = getDescValue('newTaskDesc');
 
                 // Confirm if no project
                 if (!projectId) {
@@ -972,7 +1189,7 @@
                         person: person,
                         date: dateStart,
                         date_end: dateEnd,
-                        time: time,
+                        time: '',
                         done: false,
                         urgent: false,
                         priority: priority,
@@ -1095,49 +1312,82 @@
             });
         };
 
-        // ===== DRAG-TO-NEST =====
+        // ===== DRAG-TO-NEST (list) — classic HTML5, clickables off while dragging =====
         function initTaskDragAndDrop() {
-            const cards = document.querySelectorAll('.task-card[draggable="true"]');
-            let draggedId = null;
+            const list = document.getElementById('tasksList');
+            if (!list) return;
 
-            cards.forEach(card => {
-                card.addEventListener('dragstart', (e) => {
-                    draggedId = card.dataset.taskId;
+            list.querySelectorAll('.task-card[draggable="true"]').forEach(card => {
+                card.ondragstart = (e) => {
+                    // Innermost card wins (child over parent)
+                    const source = e.target.closest('.task-card[draggable="true"]');
+                    if (source !== card) return;
+                    e.stopPropagation();
+                    setDndActive(true);
                     card.classList.add('dragging');
                     e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', draggedId);
-                });
-                card.addEventListener('dragend', () => {
+                    e.dataTransfer.setData('text/plain', card.dataset.taskId || '');
+                };
+                card.ondragend = () => {
+                    setDndActive(false);
                     card.classList.remove('dragging');
-                    document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
-                    draggedId = null;
-                });
-                card.addEventListener('dragover', (e) => {
+                    list.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+                };
+                card.ondragover = (e) => {
+                    const dragging = list.querySelector('.task-card.dragging');
+                    if (!dragging || dragging === card) return;
+                    const over = e.target.closest('.task-card[draggable="true"]');
+                    if (over !== card) return;
                     e.preventDefault();
-                    if (draggedId && card.dataset.taskId !== draggedId) {
-                        card.classList.add('drop-target');
-                    }
-                });
-                card.addEventListener('dragleave', () => {
-                    card.classList.remove('drop-target');
-                });
-                card.addEventListener('drop', async (e) => {
+                    e.stopPropagation();
+                    list.querySelectorAll('.drop-target').forEach(el => {
+                        if (el !== card) el.classList.remove('drop-target');
+                    });
+                    card.classList.add('drop-target');
+                    e.dataTransfer.dropEffect = 'move';
+                };
+                card.ondragleave = (e) => {
+                    if (!card.contains(e.relatedTarget)) card.classList.remove('drop-target');
+                };
+                card.ondrop = async (e) => {
+                    const over = e.target.closest('.task-card[draggable="true"]');
+                    if (over !== card) return;
                     e.preventDefault();
+                    e.stopPropagation();
+                    setDndActive(false);
                     card.classList.remove('drop-target');
+
+                    const draggedId = e.dataTransfer.getData('text/plain');
                     const targetId = card.dataset.taskId;
                     if (!draggedId || draggedId === targetId) return;
 
+                    const byId = Object.fromEntries(CRM.getTasks().map(t => [t.id, t]));
+                    let walk = targetId;
+                    while (walk) {
+                        if (walk === draggedId) {
+                            showToast('Нельзя вложить задачу в свою подзадачу', 'error');
+                            return;
+                        }
+                        walk = byId[walk]?.parent_id;
+                    }
+
+                    const task = byId[draggedId];
+                    const target = byId[targetId];
+                    if (!task || !target) return;
+                    if ((task.project_id || '') !== (target.project_id || '')) {
+                        showToast('Можно вкладывать только задачи одного проекта', 'error');
+                        return;
+                    }
+
                     try {
-                        const task = CRM.getTasks().find(t => t.id === draggedId);
-                        if (!task) return;
-                        await API.updateTask(draggedId, { ...task, parent_id: targetId });
+                        await CRM.updateTask(draggedId, { parent_id: targetId });
                         showToast('Задача стала подзадачей', 'success');
                         await CRM.load();
                         await renderTasks();
                     } catch (err) {
                         showToast(err.message || 'Ошибка', 'error');
                     }
-                });
+                };
             });
         }
 
