@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Задачи — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=27">
+    <link rel="stylesheet" href="/assets/css/style.css?v=38">
     <style>
         .task-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px; transition: all 0.15s; overflow: visible; }
         .task-card:hover { box-shadow: var(--shadow-sm); }
@@ -80,8 +80,8 @@
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=17"></script>
-    <script src="/assets/js/app.js?v=27"></script>
+    <script src="/assets/js/api.js?v=18"></script>
+    <script src="/assets/js/app.js?v=34"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -281,15 +281,24 @@
         };
         
         window.deleteTask = async function(id) {
-            confirmDelete('Удалить задачу?', async () => {
-                try {
+            const task = (CRM.getTasks() || []).find(t => t.id === id);
+            const name = task ? task.name : 'Задача';
+            confirmDelete('Задача «' + name + '» удалена', {
+                optimistic: () => {
+                    if (CRM._cache && Array.isArray(CRM._cache.tasks)) {
+                        CRM._cache.tasks = CRM._cache.tasks.filter(t => t.id !== id);
+                    }
+                    renderTasks();
+                },
+                commit: async () => {
                     await API.deleteTask(id);
-                    showToast('Задача удалена', 'success');
                     await CRM.load();
                     renderTasks();
-                    loadActivity();
-                } catch (err) {
-                    showToast('Ошибка', 'error');
+                    if (typeof loadActivity === 'function') loadActivity();
+                },
+                undo: async () => {
+                    await CRM.load();
+                    renderTasks();
                 }
             });
         };
@@ -441,7 +450,7 @@
                 // Clone mode — standard modal with submit button
                 overlay.innerHTML = `
                     <div class="modal" onclick="event.stopPropagation()">
-                        <div class="modal-header"><h3 class="modal-title">Копировать задачу</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                        <div class="modal-header"><h3 class="modal-title">Копировать задачу</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                         <div class="modal-body">
                             <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                             <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('editTaskDesc', task.description || '', 'Подробности задачи…')}</div>
@@ -478,7 +487,7 @@
                                 <h3 class="modal-title">Редактировать задачу</h3>
                                 <span id="autoSaveIndicator" style="font-size:0.8rem;font-weight:500;transition:color 0.3s;"></span>
                             </div>
-                            <button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                            <button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                         </div>
                         <div class="modal-body">
                             <div class="form-group"><label class="form-label" for="editTaskName">Название *</label><input type="text" class="form-input" id="editTaskName" value="${task.name}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
@@ -749,6 +758,7 @@
                                 <div style="flex:1;min-width:0;">
                                     <div class="task-title-row">
                                         ${renderPriorityMark(t.priority)}
+                                        ${(!t.parent_id && (t.is_epic || children.length > 0)) ? '<span class="epic-badge" style="font-size:0.65rem;padding:1px 6px;margin-right:4px;">Epic</span>' : ''}
                                         <div class="task-name" style="font-weight:600;font-size:0.95rem;${isDone ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${String(t.name || '').replace(/</g,'&lt;')}</div>
                                     </div>
                                     ${t.description ? renderDescClamp(t.description, { lines: 3, id: 'dlist_' + t.id }) : ''}
@@ -888,6 +898,7 @@
                         <div style="display:flex;justify-content:space-between;align-items:start;gap:6px;">
                             <div class="task-title-row" style="flex:1;">
                                 ${renderPriorityMark(t.priority)}
+                                ${(!t.parent_id && (t.is_epic || children.length > 0)) ? '<span class="epic-badge" style="font-size:0.6rem;padding:1px 5px;">Epic</span>' : ''}
                                 <div class="kanban-card-title" style="${t.done ? 'text-decoration:line-through;color:var(--gray-400);' : ''}">${String(t.name || '').replace(/</g,'&lt;')}</div>
                             </div>
                         </div>
@@ -1040,18 +1051,23 @@
             const overlay = document.getElementById('modalOverlay');
             const projects = CRM.getProjects();
             const currentUser = API.getCurrentUser();
-            const personOpts = ['Костя', 'Максим', 'Андрей'].map(p => `<option${currentUser && currentUser.name === p ? ' selected' : ''}>${p}</option>`).join('');
+            const draft = DraftStore.load('new_task') || {};
+            const personOpts = ['Костя', 'Максим', 'Андрей'].map(p => {
+                const sel = (draft.person || (currentUser && currentUser.name) || '') === p ? ' selected' : '';
+                return `<option${sel}>${p}</option>`;
+            }).join('');
+            const prio = draft.priority || 'medium';
 
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('newTaskDesc', '', 'Подробности задачи…')}</div>
+                        <div class="form-group"><label class="form-label" for="newTaskName">Название *</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" value="${String(draft.name || '').replace(/"/g, '&quot;')}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('newTaskDesc', draft.description || '', 'Подробности задачи…')}</div>
                         <div class="form-group">
                             <label class="form-label">Проект</label>
                             <div class="hashtag-search-wrapper" style="width:100%;">
-                                <input type="text" class="form-input" id="newTaskProject" placeholder="Поиск проекта..." autocomplete="off" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">
+                                <input type="text" class="form-input" id="newTaskProject" value="${String(draft.projectLabel || '').replace(/"/g, '&quot;')}" data-selected-id="${draft.projectId || ''}" placeholder="Поиск проекта..." autocomplete="off" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">
                                 <button class="hashtag-arrow" onclick="event.stopPropagation();toggleProjectDropdown('newTaskProjectDropdown')" aria-label="Показать все проекты"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button>
                                 <div class="hashtag-dropdown" id="newTaskProjectDropdown"></div>
                             </div>
@@ -1061,25 +1077,40 @@
                             <div class="form-group">
                                 <label class="form-label" for="newTaskPriority">Приоритет</label>
                                 <select class="form-select" id="newTaskPriority" onclick="event.stopPropagation()">
-                                    <option value="low">🟢 Низкий</option>
-                                    <option value="medium" selected>🟡 Средний</option>
-                                    <option value="high">🔴 Высокий</option>
+                                    <option value="low"${prio === 'low' ? ' selected' : ''}>🟢 Низкий</option>
+                                    <option value="medium"${prio === 'medium' ? ' selected' : ''}>🟡 Средний</option>
+                                    <option value="high"${prio === 'high' ? ' selected' : ''}>🔴 Высокий</option>
                                 </select>
                             </div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newTaskDate">Начало</label><input type="datetime-local" class="form-input" id="newTaskDate" value="${todayDatetimeLocal()}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="newTaskDateEnd" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDate">Начало</label><input type="datetime-local" class="form-input" id="newTaskDate" value="${draft.date || todayDatetimeLocal()}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="newTaskDateEnd" value="${draft.dateEnd || ''}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                     </div>
-                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal(true)">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
             initProjectSearch('newTaskProject', 'newTaskProjectDropdown');
-            bindRichEditor('newTaskDesc');
+            bindRichEditor('newTaskDesc', { onChange: () => DraftStore.save('new_task', collectNewTaskDraft()) });
+            DraftStore.bind('new_task', collectNewTaskDraft, () => {});
         };
+
+        function collectNewTaskDraft() {
+            const projectInput = document.getElementById('newTaskProject');
+            return {
+                name: document.getElementById('newTaskName')?.value || '',
+                description: getDescValue('newTaskDesc'),
+                projectId: projectInput?.dataset.selectedId || '',
+                projectLabel: projectInput?.value || '',
+                person: document.getElementById('newTaskPerson')?.value || '',
+                priority: document.getElementById('newTaskPriority')?.value || 'medium',
+                date: document.getElementById('newTaskDate')?.value || '',
+                dateEnd: document.getElementById('newTaskDateEnd')?.value || ''
+            };
+        }
 
         window.showAddNestedTask = function(parentId) {
             const parent = CRM.getTasks().find(t => t.id === parentId);
@@ -1090,7 +1121,7 @@
             ).join('');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Вложенная задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Вложенная задача</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <p class="text-sm text-muted" style="margin:0 0 12px;">Родитель: <strong>${String(parent.name || '').replace(/</g,'&lt;')}</strong></p>
                         <div class="form-group"><label class="form-label" for="nestTaskName">Название *</label><input type="text" class="form-input" id="nestTaskName" placeholder="Что сделать?"></div>
@@ -1127,13 +1158,14 @@
                     hashtags: [],
                     description: ''
                 });
-                // Ensure parent is epic-ish for hierarchy visibility
-                if (parent && !parent.is_epic && !parent.parent_id) {
-                    try { await CRM.updateTask(parentId, { is_epic: true }); } catch (e) {}
-                }
                 closeModal();
                 showToast('Вложенная задача создана', 'success');
                 await CRM.load();
+                // Auto-Epic when parent has linked children
+                const childCount = CRM.getTasks().filter(t => t.parent_id === parentId).length;
+                if (parent && !parent.parent_id && childCount >= 1 && !CRM.getTasks().find(t => t.id === parentId)?.is_epic) {
+                    try { await CRM.updateTask(parentId, { is_epic: true }); await CRM.load(); } catch (e) {}
+                }
                 await renderTasks();
             } catch (err) {
                 showToast(err.message || 'Ошибка', 'error');
@@ -1144,11 +1176,11 @@
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новая подзадача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новая подзадача</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="subtaskName">Название *</label><input type="text" class="form-input" id="subtaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="subtaskPerson">Ответственный</label><select class="form-select" id="subtaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
+                            <div class="form-group"><label class="form-label" for="subtaskPerson">Исполнитель</label><select class="form-select" id="subtaskPerson" onclick="event.stopPropagation()"><option>Костя</option><option>Максим</option><option>Андрей</option></select></div>
                             <div class="form-group"><label class="form-label" for="subtaskDeadline">Дедлайн</label><input type="date" class="form-input" id="subtaskDeadline" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                     </div>
@@ -1165,7 +1197,8 @@
             await withButtonLock(submitBtn, async () => {
                 if (!validateForm([{ id: 'newTaskName', required: true, message: 'Введите название' }])) return;
 
-                // Save ALL form values BEFORE showing confirm dialog
+                // Save ALL form values BEFORE showing confirm dialog (works even if rich editor is open)
+                if (typeof flushAllRichEditors === 'function') flushAllRichEditors();
                 const name = document.getElementById('newTaskName').value.trim();
                 const projectInput = document.getElementById('newTaskProject');
                 const projectId = (projectInput && projectInput.dataset.selectedId) ? projectInput.dataset.selectedId : '';
@@ -1201,6 +1234,7 @@
                     return;
                 }
 
+                DraftStore.clear('new_task');
                 closeModal();
                 showToast('Задача создана', 'success');
                 await CRM.load();
@@ -1457,7 +1491,7 @@
 
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Настройка статусов задач</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Настройка статусов задач</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div style="font-size:0.8rem;color:var(--gray-500);margin-bottom:12px;">Перетащите для порядка · Двойной клик по названию для переименования</div>
                         <div id="taskColConfigList">${renderColList()}</div>

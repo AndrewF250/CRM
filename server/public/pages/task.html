@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Задача — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=24">
+    <link rel="stylesheet" href="/assets/css/style.css?v=31">
     <style>
         .task-stat-card { position: relative; }
         .task-stat-card .edit-pencil {
@@ -32,8 +32,8 @@
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=17"></script>
-    <script src="/assets/js/app.js?v=24"></script>
+    <script src="/assets/js/api.js?v=18"></script>
+    <script src="/assets/js/app.js?v=31"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -227,6 +227,11 @@
         window.pageRedo = redoChange;
 
         async function toggleEpic() {
+            // Nested (linked) tasks cannot be Epic
+            if (task.parent_id) {
+                showToast('Вложенная задача не может быть Epic', 'error');
+                return;
+            }
             if (task.is_epic) {
                 await patchTask({ is_epic: false }, { silent: true });
                 showToast('Epic снят', 'success');
@@ -242,7 +247,22 @@
             const statusCol = taskColumns.find(c => c.name === task.column_status);
             const statusHex = getColHex(statusCol?.color);
             const childTasks = CRM.getTasks().filter(t => t.parent_id === taskId);
-            const isEpic = !!task.is_epic;
+            const isNested = !!task.parent_id;
+            // Epic only for top-level tasks (not linked under another)
+            const isEpic = !isNested && (!!task.is_epic || childTasks.length > 0);
+            if (!isNested && childTasks.length > 0 && !task.is_epic && !window._epicAutoing) {
+                window._epicAutoing = true;
+                CRM.updateTask(taskId, { is_epic: true, parent_id: null }).then(() => {
+                    task.is_epic = true;
+                }).catch(() => {}).finally(() => { window._epicAutoing = false; });
+            }
+            // If somehow nested + epic — clear it
+            if (isNested && task.is_epic && !window._epicAutoing) {
+                window._epicAutoing = true;
+                CRM.updateTask(taskId, { is_epic: false }).then(() => {
+                    task.is_epic = false;
+                }).catch(() => {}).finally(() => { window._epicAutoing = false; });
+            }
             const dateRange = formatTaskDateRange(task) || '—';
 
             document.title = (isEpic ? '⚡ ' : '') + (task.name || 'Задача') + ' — CRM System';
@@ -260,9 +280,9 @@
                 <div class="page-header">
                     <div style="flex:1;min-width:0;">
                         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                            <button type="button" class="epic-badge${isEpic ? '' : ' inactive'}" id="epicToggleBtn" title="${isEpic ? 'Снять статус Epic' : 'Сделать задачу основной (Epic)'}">
-                                ${boltSvg}${isEpic ? ' Epic' : ''}
-                            </button>
+                            ${isNested
+                                ? '<span class="badge badge-gray" title="Вложена в другую задачу — не может быть Epic">Вложена</span>'
+                                : `<button type="button" class="epic-badge${isEpic ? '' : ' inactive'}" id="epicToggleBtn" title="${isEpic ? 'Снять статус Epic' : 'Сделать задачу основной (Epic)'}">${boltSvg}${isEpic ? ' Epic' : ''}</button>`}
                             ${renderPriorityMark(task.priority)}
                             <h1 class="page-title click-edit" id="taskTitle" data-field="name" title="Кликните, чтобы изменить (F2)">${escapeHtml(task.name)}</h1>
                             <span class="badge badge-gray" style="border-left:3px solid ${statusHex};">${escapeHtml(task.column_status || '—')}</span>
@@ -340,7 +360,7 @@
                 <div class="card" style="margin-bottom:16px;border-left:3px solid ${statusHex};">
                     <div class="card-header"><h3 class="card-title">Описание</h3></div>
                     <div class="card-body" id="taskDescWrap">
-                        ${renderRichEditor('taskDescEditor', task.description || '', 'Описание задачи…')}
+                        ${renderRichEditor('taskDescEditor', task.description || '', 'Описание задачи…', { fullPreview: true })}
                     </div>
                 </div>
 
@@ -403,13 +423,12 @@
             bindRichEditor('taskDescEditor', {
                 onBlur: async (html) => {
                     if ((task.description || '') === html) return;
-                    await patchTask({ description: html }, { silent: true });
+                    await patchTask({ description: html }, { silent: true, skipHistory: true });
                 },
                 onChange: (html) => {
                     clearTimeout(descSaveTimer);
                     descSaveTimer = setTimeout(async () => {
                         if ((task.description || '') === html) return;
-                        // Keep local task in sync without full re-render while editing
                         task = { ...task, description: html };
                         try { await CRM.updateTask(taskId, { description: html }); } catch (e) {}
                     }, 900);
@@ -526,16 +545,24 @@
             });
         }
 
+        async function ensureEpicIfManyChildren() {
+            await CRM.load();
+            task = CRM.getTasks().find(t => t.id === taskId) || task;
+            // Only top-level tasks can become Epic
+            if (task.parent_id) return;
+            const count = CRM.getTasks().filter(t => t.parent_id === taskId).length;
+            if (count >= 1 && !task.is_epic) {
+                await patchTask({ is_epic: true, parent_id: null }, { silent: true, skipHistory: true });
+            }
+        }
+
         async function linkRelatedTask(id) {
             if (!id) return;
             try {
-                if (!task.is_epic) {
-                    await patchTask({ is_epic: true, parent_id: null }, { silent: true });
-                }
                 await CRM.updateTask(id, { parent_id: taskId });
                 touchRecent(id);
                 showToast('Задача привязана', 'success');
-                await CRM.load();
+                await ensureEpicIfManyChildren();
                 render();
             } catch (err) {
                 showToast(err.message || 'Ошибка', 'error');
@@ -551,9 +578,6 @@
                 return;
             }
             try {
-                if (!task.is_epic) {
-                    await patchTask({ is_epic: true, parent_id: null }, { silent: true });
-                }
                 const created = await CRM.addTask({
                     project_id: task.project_id || '',
                     name,
@@ -571,7 +595,7 @@
                 });
                 if (created && created.id) touchRecent(created.id);
                 showToast('Связанная задача создана', 'success');
-                await CRM.load();
+                await ensureEpicIfManyChildren();
                 render();
                 const next = document.getElementById('newChildName');
                 if (next) { next.value = ''; next.focus(); }
@@ -654,13 +678,22 @@
             render();
         };
         window.relatedDelete = function(id) {
-            confirmDelete('Удалить связанную задачу?', async () => {
-                try {
+            confirmDelete('Связанная задача удалена', {
+                optimistic: () => {
+                    if (CRM._cache && Array.isArray(CRM._cache.tasks)) {
+                        CRM._cache.tasks = CRM._cache.tasks.filter(t => t.id !== id);
+                    }
+                    render();
+                },
+                commit: async () => {
                     await API.deleteTask(id);
-                    showToast('Удалено', 'success');
                     await CRM.load();
                     render();
-                } catch (e) { showToast('Ошибка', 'error'); }
+                },
+                undo: async () => {
+                    await CRM.load();
+                    render();
+                }
             });
         };
 
@@ -750,12 +783,42 @@
                     await patchTask({ priority: v });
                 });
             } else if (field === 'project_id') {
-                openInlineSelect(card, info, label, [
-                    { value: '', label: '— Без проекта —' },
-                    ...CRM.getProjects().map(p => ({ value: p.id, label: p.client + ' — ' + p.name }))
-                ], task.project_id || '', async (v) => {
-                    await patchTask({ project_id: v });
+                const cur = CRM.getProject(task.project_id);
+                const curLabel = cur ? (cur.client + ' — ' + cur.name) : '';
+                info.innerHTML = `
+                    <div class="stat-label">${label}</div>
+                    <div class="hashtag-search-wrapper" style="width:100%;margin-top:6px;">
+                        <input type="text" class="form-input" id="inlineProjectSearch" value="${escapeHtml(curLabel)}" data-selected-id="${escapeHtml(task.project_id || '')}" placeholder="Поиск проекта…" autocomplete="off" style="padding:6px 8px;font-size:0.85rem;">
+                        <div class="hashtag-dropdown" id="inlineProjectDd"></div>
+                    </div>
+                    <div style="display:flex;gap:6px;margin-top:8px;">
+                        <button class="btn btn-secondary btn-sm" id="clearProject">Без проекта</button>
+                        <button class="btn btn-secondary btn-sm" id="cancelProject">✕</button>
+                    </div>`;
+                const input = info.querySelector('#inlineProjectSearch');
+                const dd = info.querySelector('#inlineProjectDd');
+                const projects = CRM.getProjects();
+                function showProjects(filter) {
+                    let matches = filter
+                        ? projects.filter(p => (p.name + ' ' + p.client).toLowerCase().includes(filter.toLowerCase()))
+                        : projects;
+                    dd.innerHTML = '<div class="hashtag-dropdown-item" data-project-id="" data-project-name="">— Без проекта —</div>' +
+                        matches.map(p => `<div class="hashtag-dropdown-item" data-project-id="${p.id}" data-project-name="${escapeHtml(p.client + ' — ' + p.name)}">${escapeHtml(p.client + ' — ' + p.name)}</div>`).join('');
+                    dd.classList.add('show');
+                }
+                input.addEventListener('focus', () => showProjects(input.value.trim()));
+                input.addEventListener('input', () => {
+                    if (!input.value.trim()) input.dataset.selectedId = '';
+                    showProjects(input.value.trim());
                 });
+                dd.addEventListener('click', async (e) => {
+                    const item = e.target.closest('.hashtag-dropdown-item');
+                    if (!item) return;
+                    await patchTask({ project_id: item.dataset.projectId || '' });
+                });
+                info.querySelector('#clearProject').onclick = async () => { await patchTask({ project_id: '' }); };
+                info.querySelector('#cancelProject').onclick = () => render();
+                setTimeout(() => input.focus(), 30);
             } else if (field === 'dates') {
                 info.innerHTML = `
                     <div class="stat-label">${label}</div>
@@ -801,15 +864,21 @@
         window.toggleEpic = toggleEpic;
 
         window.deleteThisTask = function() {
-            confirmDelete('Удалить задачу?', async () => {
-                try {
+            const back = task.project_id
+                ? '/pages/project.html?id=' + task.project_id
+                : '/pages/tasks.html';
+            confirmDelete('Задача «' + (task.name || '') + '» удалена', {
+                optimistic: () => {
+                    const main = document.querySelector('.main-content .content-wrapper');
+                    if (main) main.style.opacity = '0.35';
+                },
+                commit: async () => {
                     await API.deleteTask(taskId);
-                    showToast('Задача удалена', 'success');
-                    window.location.href = task.project_id
-                        ? '/pages/project.html?id=' + task.project_id
-                        : '/pages/tasks.html';
-                } catch (err) {
-                    showToast(err.message || 'Ошибка', 'error');
+                    window.location.href = back;
+                },
+                undo: () => {
+                    const main = document.querySelector('.main-content .content-wrapper');
+                    if (main) main.style.opacity = '';
                 }
             });
         };
@@ -834,7 +903,7 @@
             { keys: 'N', label: 'Новая связанная задача', match: (e) => !e.ctrlKey && !e.metaKey && (e.key === 'n' || e.key === 'N' || e.key === '+'), run: () => {
                 const input = document.getElementById('newChildName');
                 if (input) input.focus();
-                else if (!task.is_epic) toggleEpic();
+                else if (!task.parent_id && !task.is_epic) toggleEpic();
             }},
             { keys: 'S', label: 'Статус', match: (e) => !e.ctrlKey && e.key.toLowerCase() === 's', run: () => editField('column_status') },
             { keys: 'P', label: 'Исполнитель', match: (e) => !e.ctrlKey && e.key.toLowerCase() === 'p', run: () => editField('person') },

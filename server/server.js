@@ -1,12 +1,17 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
+
+// Ensure uploads directory exists (multer fails with ENOENT otherwise)
+const uploadsDir = path.join(__dirname, 'uploads');
+try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) {}
 
 // Helper: make avatar initials from a name
 function makeAvatar(name) {
@@ -88,12 +93,46 @@ app.use((req, res, next) => {
   next();
 });
 
-// File upload
+// File upload (max 30 MB)
+const UPLOAD_MAX_BYTES = 30 * 1024 * 1024;
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, 'uploads')),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname))
+  destination: (req, file, cb) => {
+    try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) {}
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').slice(0, 20);
+    cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + ext);
+  }
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: UPLOAD_MAX_BYTES }
+});
+
+/** multer.single wrapper with clear errors */
+function uploadSingle(field) {
+  return (req, res, next) => {
+    upload.single(field)(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Максимальный размер файла — 30 МБ' });
+        }
+        if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+          return res.status(400).json({ error: 'Неверное поле файла (ожидается «file»)' });
+        }
+        return res.status(400).json({ error: 'Multer: ' + (err.message || err.code) });
+      }
+      if (err) {
+        const msg = err.code === 'ENOENT'
+          ? 'Папка uploads не найдена на сервере'
+          : (err.message || 'Ошибка записи файла на диск');
+        return res.status(500).json({ error: msg });
+      }
+      next();
+    });
+  };
+}
 
 // ==================== AUTH API ====================
 
@@ -430,13 +469,23 @@ app.post('/api/tasks', requireAuth, (req, res) => {
     }
     
     const creator = (req.user && req.user.name) || '';
+    // Nested tasks can never be Epic — only top-level parents
+    const epicVal = parent_id ? 0 : (is_epic ? 1 : 0);
     db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, created_by, updated_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       taskId, project_id || '', name, column_status || 'Ожидает', person || 'Костя',
-      date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium', description || '', is_epic ? 1 : 0,
+      date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium', description || '', epicVal,
       creator, creator
     );
     
+    // Auto-Epic only for top-level parent (not nested under another task)
+    if (parent_id) {
+      const parent = db.prepare('SELECT id, parent_id FROM tasks WHERE id = ?').get(parent_id);
+      if (parent && !parent.parent_id) {
+        db.prepare('UPDATE tasks SET is_epic=1, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(parent_id);
+      }
+    }
+
     if (project_id) updateProjectProgress(project_id);
     logActivity(project_id || '', taskId, req.user.name, 'create_task', `Создана задача: ${name}`);
     notifyUser(person || '', req.user.name, 'create_task', `${req.user.name} назначил вам задачу «${name}»`, taskId, project_id || null);
@@ -450,11 +499,13 @@ app.post('/api/tasks', requireAuth, (req, res) => {
 
 app.put('/api/tasks/:id', requireAuth, (req, res) => {
   try {
-    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic } = req.body;
+    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, project_id } = req.body;
     
     const old = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Задача не найдена' });
     
+    const newProjectId = project_id !== undefined ? (project_id || '') : (old.project_id || '');
+
     // Validate parent_id if changing
     const newParentId = parent_id !== undefined ? (parent_id || null) : old.parent_id;
     if (newParentId) {
@@ -466,19 +517,29 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
         checkId = p ? p.parent_id : null;
       }
       const parent = db.prepare('SELECT * FROM tasks WHERE id = ?').get(newParentId);
-      if (parent && (parent.project_id || '') !== (old.project_id || '')) {
+      if (parent && (parent.project_id || '') !== (newProjectId || '')) {
         return res.status(400).json({ error: 'Родительская задача должна быть из того же проекта' });
       }
     }
 
-    const epicFlag = is_epic !== undefined ? (is_epic ? 1 : 0) : (old.is_epic ? 1 : 0);
+    let epicFlag = is_epic !== undefined ? (is_epic ? 1 : 0) : (old.is_epic ? 1 : 0);
+    // Nested tasks can never be Epic — strip flag when linked under a parent
+    if (newParentId) epicFlag = 0;
     
     const updater = (req.user && req.user.name) || '';
-    db.prepare(`UPDATE tasks SET name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, description=?, is_epic=?, updated_by=?, updated_at=CURRENT_TIMESTAMP
+    db.prepare(`UPDATE tasks SET project_id=?, name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, description=?, is_epic=?, updated_by=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?`).run(
-      name, column_status, person, date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0,
+      newProjectId, name, column_status, person, date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0,
       JSON.stringify(hashtags || []), newParentId, priority || 'medium', description || '', epicFlag, updater, req.params.id
     );
+
+    // Auto-Epic only for top-level parent (not nested)
+    if (newParentId) {
+      const parent = db.prepare('SELECT id, parent_id FROM tasks WHERE id = ?').get(newParentId);
+      if (parent && !parent.parent_id) {
+        db.prepare('UPDATE tasks SET is_epic=1, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(newParentId);
+      }
+    }
     
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (task) {
@@ -643,6 +704,55 @@ app.delete('/api/task-columns/:id', requireAuth, (req, res) => {
   }
 });
 
+// ==================== CALENDAR STATUSES ====================
+app.get('/api/calendar-statuses', requireAuth, (req, res) => {
+  try {
+    res.json(db.prepare('SELECT * FROM calendar_statuses ORDER BY sort_order').all());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/calendar-statuses', requireAuth, (req, res) => {
+  try {
+    const { name, color } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Название обязательно' });
+    const maxOrder = db.prepare('SELECT MAX(sort_order) as max FROM calendar_statuses').get();
+    const sortOrder = (maxOrder.max ?? -1) + 1;
+    const result = db.prepare('INSERT INTO calendar_statuses (name, color, sort_order) VALUES (?, ?, ?)').run(name.trim(), color || 'blue', sortOrder);
+    res.status(201).json(db.prepare('SELECT * FROM calendar_statuses WHERE id = ?').get(result.lastInsertRowid));
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Статус уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/calendar-statuses/:id', requireAuth, (req, res) => {
+  try {
+    const { name, color, sort_order } = req.body;
+    const existing = db.prepare('SELECT * FROM calendar_statuses WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Статус не найден' });
+    db.prepare('UPDATE calendar_statuses SET name=?, color=?, sort_order=? WHERE id=?').run(
+      name || existing.name, color || existing.color, sort_order !== undefined ? sort_order : existing.sort_order, req.params.id
+    );
+    res.json(db.prepare('SELECT * FROM calendar_statuses WHERE id = ?').get(req.params.id));
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Статус уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/calendar-statuses/:id', requireAuth, (req, res) => {
+  try {
+    const column = db.prepare('SELECT * FROM calendar_statuses WHERE id = ?').get(req.params.id);
+    if (!column) return res.status(404).json({ error: 'Статус не найден' });
+    db.prepare('DELETE FROM calendar_statuses WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== SUBTASKS API ====================
 
 app.get('/api/tasks/:taskId/subtasks', requireAuth, (req, res) => {
@@ -683,6 +793,312 @@ app.delete('/api/subtasks/:id', requireAuth, (req, res) => {
   try {
     db.prepare('DELETE FROM subtasks WHERE id = ?').run(req.params.id);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== WIKI KINDS API ====================
+
+app.get('/api/wiki-kinds', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM wiki_kinds ORDER BY sort_order ASC, label ASC').all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/wiki-kinds', requireAuth, (req, res) => {
+  try {
+    const label = String(req.body.label || '').trim();
+    if (!label) return res.status(400).json({ error: 'Укажите название типа' });
+    let key = String(req.body.key || '').trim().toLowerCase()
+      .replace(/[^a-z0-9а-яё_-]+/gi, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
+    if (!key) {
+      key = 'kind_' + Date.now().toString(36);
+    }
+    // Ensure unique key
+    let base = key;
+    let i = 1;
+    while (db.prepare('SELECT id FROM wiki_kinds WHERE key = ?').get(key)) {
+      key = base + '_' + i++;
+    }
+    const max = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM wiki_kinds').get();
+    const info = db.prepare('INSERT INTO wiki_kinds (key, label, is_system, sort_order) VALUES (?, ?, 0, ?)').run(
+      key, label, (max?.m ?? -1) + 1
+    );
+    const row = db.prepare('SELECT * FROM wiki_kinds WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/wiki-kinds/:id', requireAuth, (req, res) => {
+  try {
+    const kind = db.prepare('SELECT * FROM wiki_kinds WHERE id = ?').get(req.params.id);
+    if (!kind) return res.status(404).json({ error: 'Тип не найден' });
+    const pages = db.prepare(
+      'SELECT id, title, kind, parent_id FROM wiki_pages WHERE kind = ? ORDER BY title ASC LIMIT 100'
+    ).all(kind.key);
+    if (pages.length) {
+      return res.status(409).json({
+        error: 'Нельзя удалить тип — есть страницы с этим типом',
+        pages,
+        count: pages.length
+      });
+    }
+    db.prepare('DELETE FROM wiki_kinds WHERE id = ?').run(kind.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Generic file upload for rich-editor attachments
+app.post('/api/uploads', requireAuth, uploadSingle('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
+    let originalname = req.file.originalname || 'file';
+    try {
+      // Fix mojibake from latin1 multipart filenames
+      originalname = Buffer.from(originalname, 'latin1').toString('utf8');
+    } catch (e) {}
+    res.status(201).json({
+      filename: req.file.filename,
+      url: '/uploads/' + req.file.filename,
+      originalname,
+      mimetype: req.file.mimetype || '',
+      size: req.file.size || 0
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== WIKI PAGES API (Confluence-like) ====================
+
+function getWikiDescendantIds(rootId) {
+  const all = db.prepare('SELECT id, parent_id FROM wiki_pages').all();
+  const children = new Map();
+  all.forEach(p => {
+    const key = p.parent_id == null ? 'root' : String(p.parent_id);
+    if (!children.has(key)) children.set(key, []);
+    children.get(key).push(p.id);
+  });
+  const out = [];
+  const stack = [Number(rootId)];
+  while (stack.length) {
+    const id = stack.pop();
+    out.push(id);
+    const kids = children.get(String(id)) || [];
+    kids.forEach(k => stack.push(k));
+  }
+  return out;
+}
+
+function wouldCreateCycle(pageId, newParentId) {
+  if (newParentId == null || newParentId === '' || newParentId === 'null') return false;
+  const pid = Number(newParentId);
+  if (pid === Number(pageId)) return true;
+  const descendants = getWikiDescendantIds(pageId);
+  return descendants.includes(pid);
+}
+
+app.get('/api/wiki-pages', requireAuth, (req, res) => {
+  try {
+    const { project_id, kind, file_type, q } = req.query;
+    let rows = db.prepare(`
+      SELECT w.*, p.name as project_name, p.client as project_client
+      FROM wiki_pages w
+      LEFT JOIN projects p ON w.project_id = p.id
+      ORDER BY w.sort_order ASC, w.title ASC
+    `).all();
+    if (project_id) {
+      if (project_id === 'none') rows = rows.filter(r => !r.project_id);
+      else rows = rows.filter(r => String(r.project_id) === String(project_id));
+    }
+    if (kind) {
+      const kinds = String(kind).split(',').map(s => s.trim()).filter(Boolean);
+      if (kinds.length) rows = rows.filter(r => kinds.includes(r.kind));
+    }
+    if (file_type) {
+      const types = String(file_type).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      if (types.length) rows = rows.filter(r => types.includes(String(r.file_type || '').toLowerCase()));
+    }
+    if (q) {
+      const needle = String(q).toLowerCase();
+      rows = rows.filter(r =>
+        (r.title || '').toLowerCase().includes(needle) ||
+        (r.content || '').toLowerCase().includes(needle)
+      );
+    }
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/wiki-pages/upload', requireAuth, uploadSingle('file'), (req, res) => {
+  try {
+    const { parent_id, title, kind, project_id, file_type, file_size } = req.body;
+    if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
+    const parent = parent_id === undefined || parent_id === '' || parent_id === null ? null : Number(parent_id);
+    const max = db.prepare(
+      parent == null
+        ? 'SELECT COALESCE(MAX(sort_order), -1) as m FROM wiki_pages WHERE parent_id IS NULL'
+        : 'SELECT COALESCE(MAX(sort_order), -1) as m FROM wiki_pages WHERE parent_id = ?'
+    ).get(...(parent == null ? [] : [parent]));
+    const order = (max?.m ?? -1) + 1;
+    const user = req.user?.name || '';
+    const t = (title || req.file.originalname || 'Файл').trim();
+    const ext = path.extname(req.file.originalname || '').replace('.', '').toUpperCase();
+    const info = db.prepare(`INSERT INTO wiki_pages
+      (parent_id, title, content, kind, project_id, file_path, file_type, file_size, sort_order, created_by, updated_by)
+      VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      parent, t, kind || 'file', project_id || null,
+      req.file.filename, file_type || ext || 'FILE', file_size || '', order, user, user
+    );
+    const row = db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/wiki-pages/:id', requireAuth, (req, res) => {
+  try {
+    const row = db.prepare(`
+      SELECT w.*, p.name as project_name, p.client as project_client
+      FROM wiki_pages w
+      LEFT JOIN projects p ON w.project_id = p.id
+      WHERE w.id = ?
+    `).get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Страница не найдена' });
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/wiki-pages', requireAuth, (req, res) => {
+  try {
+    const { parent_id, title, content, kind, project_id, file_type, file_size, file_path, sort_order } = req.body;
+    const t = (title || '').trim() || 'Новая страница';
+    const k = kind || 'page';
+    const parent = parent_id === undefined || parent_id === '' || parent_id === null ? null : Number(parent_id);
+    let order = sort_order;
+    if (order === undefined || order === null) {
+      const max = db.prepare(
+        parent == null
+          ? 'SELECT COALESCE(MAX(sort_order), -1) as m FROM wiki_pages WHERE parent_id IS NULL'
+          : 'SELECT COALESCE(MAX(sort_order), -1) as m FROM wiki_pages WHERE parent_id = ?'
+      ).get(...(parent == null ? [] : [parent]));
+      order = (max?.m ?? -1) + 1;
+    }
+    const user = req.user?.name || '';
+    const info = db.prepare(`INSERT INTO wiki_pages
+      (parent_id, title, content, kind, project_id, file_path, file_type, file_size, sort_order, created_by, updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      parent, t, content || '', k, project_id || null,
+      file_path || '', file_type || '', file_size || '', order, user, user
+    );
+    const row = db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/wiki-pages/:id', requireAuth, (req, res) => {
+  try {
+    const old = db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Страница не найдена' });
+    const {
+      title, content, kind, project_id, parent_id, sort_order,
+      file_type, file_size, file_path
+    } = req.body;
+
+    let newParent = old.parent_id;
+    if (parent_id !== undefined) {
+      newParent = parent_id === '' || parent_id === null ? null : Number(parent_id);
+      if (wouldCreateCycle(old.id, newParent)) {
+        return res.status(400).json({ error: 'Нельзя переместить страницу в своего потомка' });
+      }
+    }
+
+    const user = req.user?.name || '';
+    db.prepare(`UPDATE wiki_pages SET
+      title = ?, content = ?, kind = ?, project_id = ?, parent_id = ?,
+      sort_order = ?, file_type = ?, file_size = ?, file_path = ?,
+      updated_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`).run(
+      title !== undefined ? String(title).trim() || old.title : old.title,
+      content !== undefined ? content : old.content,
+      kind !== undefined ? kind : old.kind,
+      project_id !== undefined ? (project_id || null) : old.project_id,
+      newParent,
+      sort_order !== undefined ? sort_order : old.sort_order,
+      file_type !== undefined ? file_type : old.file_type,
+      file_size !== undefined ? file_size : old.file_size,
+      file_path !== undefined ? file_path : old.file_path,
+      user,
+      old.id
+    );
+    const row = db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(old.id);
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Atomic reorder: [{ id, parent_id, sort_order }, ...] */
+app.post('/api/wiki-pages/reorder', requireAuth, (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) return res.status(400).json({ error: 'Пустой список' });
+
+    const get = db.prepare('SELECT id, parent_id FROM wiki_pages WHERE id = ?');
+    const upd = db.prepare(`UPDATE wiki_pages SET parent_id = ?, sort_order = ?,
+      updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
+    const user = req.user?.name || '';
+
+    const tx = db.transaction(() => {
+      for (const it of items) {
+        const id = Number(it.id);
+        if (!Number.isFinite(id)) throw new Error('Некорректный id');
+        const old = get.get(id);
+        if (!old) throw new Error('Страница не найдена: ' + id);
+        const parent = it.parent_id === undefined
+          ? old.parent_id
+          : (it.parent_id === '' || it.parent_id === null ? null : Number(it.parent_id));
+        if (wouldCreateCycle(id, parent)) {
+          throw new Error('Нельзя переместить страницу в своего потомка');
+        }
+        const order = it.sort_order !== undefined && it.sort_order !== null
+          ? Number(it.sort_order) : 0;
+        upd.run(parent, order, user, id);
+      }
+    });
+    tx();
+    res.json({ success: true, count: items.length });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Ошибка сортировки' });
+  }
+});
+
+app.delete('/api/wiki-pages/:id', requireAuth, (req, res) => {
+  try {
+    const old = db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Страница не найдена' });
+    const ids = getWikiDescendantIds(old.id);
+    const del = db.prepare('DELETE FROM wiki_pages WHERE id = ?');
+    const tx = db.transaction(() => { ids.forEach(id => del.run(id)); });
+    tx();
+    res.json({ success: true, deleted: ids.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -734,7 +1150,7 @@ app.delete('/api/documents/:id', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/documents/upload', requireAuth, upload.single('file'), (req, res) => {
+app.post('/api/documents/upload', requireAuth, uploadSingle('file'), (req, res) => {
   try {
     const { project_id, name, type, size, doc_category, template_category } = req.body;
     const category = doc_category || 'client';
@@ -749,8 +1165,13 @@ app.post('/api/documents/upload', requireAuth, upload.single('file'), (req, res)
   }
 });
 
-app.get('/uploads/:filename', requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, 'uploads', req.params.filename));
+app.get('/uploads/:filename', (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  const session = db.prepare("SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')").get(token);
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
+  const safe = path.basename(req.params.filename);
+  res.sendFile(path.join(__dirname, 'uploads', safe));
 });
 
 // ==================== CALLS API ====================
@@ -826,8 +1247,13 @@ app.get('/api/salaries', requireAuth, (req, res) => {
 
 app.post('/api/salaries', requireAuth, (req, res) => {
   try {
-    const { user_name, amount, month, note } = req.body;
-    db.prepare('INSERT INTO salaries (user_name, amount, month, note) VALUES (?, ?, ?, ?)').run(user_name, amount, month, note || '');
+    const { user_name, amount, note, pay_date, payment_method } = req.body;
+    const today = new Date().toISOString().split('T')[0];
+    const payDate = pay_date || today;
+    const month = (req.body.month || String(payDate).slice(0, 7) || today.slice(0, 7));
+    const method = payment_method === 'cash' ? 'cash' : 'transfer';
+    db.prepare('INSERT INTO salaries (user_name, amount, month, note, pay_date, payment_method) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(user_name, amount, month, note || '', payDate, method);
     const salary = db.prepare('SELECT * FROM salaries WHERE id = ?').get(db.prepare('SELECT last_insert_rowid() as id').get().id);
     logActivity(null, null, req.user.name, 'add_salary', `Зарплата: ${user_name} - ${amount}₽ (${month})`);
     res.status(201).json({ ...salary, paid: !!salary.paid });
@@ -838,9 +1264,26 @@ app.post('/api/salaries', requireAuth, (req, res) => {
 
 app.put('/api/salaries/:id', requireAuth, (req, res) => {
   try {
-    const { user_name, amount, month, paid, note } = req.body;
-    const paidDate = paid ? new Date().toISOString().split('T')[0] : null;
-    db.prepare('UPDATE salaries SET user_name=?, amount=?, month=?, paid=?, paid_date=?, note=? WHERE id=?').run(user_name, amount, month, paid ? 1 : 0, paidDate, note || '', req.params.id);
+    const { user_name, amount, month, paid, note, pay_date, payment_method } = req.body;
+    const old = db.prepare('SELECT * FROM salaries WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Не найдено' });
+    const paidDate = paid ? (old.paid_date || new Date().toISOString().split('T')[0]) : null;
+    const method = payment_method === undefined
+      ? (old.payment_method || 'transfer')
+      : (payment_method === 'cash' ? 'cash' : 'transfer');
+    const payDate = pay_date !== undefined ? (pay_date || '') : (old.pay_date || '');
+    db.prepare('UPDATE salaries SET user_name=?, amount=?, month=?, paid=?, paid_date=?, note=?, pay_date=?, payment_method=? WHERE id=?')
+      .run(
+        user_name !== undefined ? user_name : old.user_name,
+        amount !== undefined ? amount : old.amount,
+        month !== undefined ? month : old.month,
+        paid ? 1 : 0,
+        paidDate,
+        note !== undefined ? (note || '') : (old.note || ''),
+        payDate,
+        method,
+        req.params.id
+      );
     const salary = db.prepare('SELECT * FROM salaries WHERE id = ?').get(req.params.id);
     res.json({ ...salary, paid: !!salary.paid });
   } catch (err) {

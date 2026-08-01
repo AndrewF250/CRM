@@ -265,11 +265,20 @@ function initCommonUI() {
         }
     });
 
-    // Modal overlay
+    // Modal overlay — close only if mousedown+click both on backdrop
+    // (so text selection that ends outside the modal does NOT close it)
     const overlay = document.getElementById('modalOverlay');
     if (overlay) {
-        overlay.addEventListener('click', closeModal);
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+        let overlayMouseDownOnBackdrop = false;
+        overlay.addEventListener('mousedown', (e) => {
+            overlayMouseDownOnBackdrop = (e.target === overlay);
+        });
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay && overlayMouseDownOnBackdrop) closeModal();
+            overlayMouseDownOnBackdrop = false;
+        });
+        // Escape = как крестик: сброс черновика
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(true); });
 
         // Focus trap: auto-focus first element when modal opens
         const modalObserver = new MutationObserver(() => {
@@ -603,24 +612,97 @@ async function withButtonLock(btnOrId, asyncFn) {
     }
 }
 
-// ==================== UNDO DELETE ====================
-function confirmDelete(message, onConfirm) {
+// ==================== UNDO DELETE (stacked toasts) ====================
+const UndoDeleteStack = {
+    items: [],
+    ensureHost() {
+        let host = document.getElementById('undoDeleteHost');
+        if (!host) {
+            host = document.createElement('div');
+            host.id = 'undoDeleteHost';
+            host.className = 'undo-delete-host';
+            document.body.appendChild(host);
+        }
+        return host;
+    },
+    layout() {
+        // Newest at bottom; older move up
+        const host = this.ensureHost();
+        const nodes = [...host.querySelectorAll('.undo-delete-toast')];
+        nodes.forEach((el, i) => {
+            const fromBottom = (nodes.length - 1 - i) * 76 + 24;
+            el.style.bottom = fromBottom + 'px';
+        });
+    }
+};
+
+/**
+ * Soft-delay delete with restore toast.
+ *
+ * New style:
+ *   confirmDelete('Задача «X» удалена', { optimistic, commit, undo })
+ * Legacy:
+ *   confirmDelete('Удалить задачу?', async () => { await API.delete… })
+ *
+ * Item should disappear immediately (optimistic). After 5s commit runs.
+ * Restore cancels commit and runs undo.
+ */
+function confirmDelete(message, onConfirmOrHandlers, maybeUndo) {
+    let handlers;
+    if (typeof onConfirmOrHandlers === 'function') {
+        handlers = {
+            commit: onConfirmOrHandlers,
+            undo: typeof maybeUndo === 'function' ? maybeUndo : null
+        };
+    } else {
+        handlers = onConfirmOrHandlers || {};
+    }
+
+    // Normalize label: "… Восстановить?"
+    let label = String(message || 'Элемент удалён');
+    if (/^удалить/i.test(label)) {
+        const rest = label.replace(/^удалить\s*/i, '').replace(/\?+$/, '').trim();
+        label = 'Удалено: ' + rest;
+    }
+    label = label.replace(/\?+$/, '');
+    if (!/восстановить/i.test(label)) label += '. Восстановить?';
+
+    try {
+        if (typeof handlers.optimistic === 'function') handlers.optimistic();
+    } catch (e) { console.error(e); }
+
+    const host = UndoDeleteStack.ensureHost();
     const t = document.createElement('div');
-    t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:10px;padding:14px 20px;border-radius:10px;font-size:0.875rem;font-weight:500;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.2);transition:all 0.3s ease;max-width:420px;background:#1F2937;';
+    t.className = 'undo-delete-toast';
     let cancelled = false;
     let seconds = 5;
-    t.innerHTML = `<span style="flex:1;">${message}</span><button id="undoBtn" style="background:rgba(255,255,255,0.15);border:none;color:#fff;cursor:pointer;padding:4px 12px;border-radius:6px;font-size:0.8rem;font-weight:600;white-space:nowrap;">Отменить (${seconds})</button>`;
-    document.body.appendChild(t);
+    t.innerHTML = `
+        <span class="undo-delete-text">${label.replace(/</g, '&lt;')}</span>
+        <button type="button" class="undo-delete-btn">Восстановить (${seconds})</button>`;
+    host.appendChild(t);
+    UndoDeleteStack.items.push(t);
+    UndoDeleteStack.layout();
 
-    const undoBtn = t.querySelector('#undoBtn');
+    const undoBtn = t.querySelector('.undo-delete-btn');
     const interval = setInterval(() => {
         seconds--;
-        if (undoBtn) undoBtn.textContent = `Отменить (${seconds})`;
+        if (undoBtn) undoBtn.textContent = `Восстановить (${seconds})`;
         if (seconds <= 0) {
             clearInterval(interval);
             if (!cancelled) {
                 t.style.opacity = '0';
-                setTimeout(() => { t.remove(); onConfirm(); }, 300);
+                t.style.transform = 'translateY(8px)';
+                setTimeout(async () => {
+                    t.remove();
+                    UndoDeleteStack.items = UndoDeleteStack.items.filter(x => x !== t);
+                    UndoDeleteStack.layout();
+                    try {
+                        if (typeof handlers.commit === 'function') await handlers.commit();
+                    } catch (err) {
+                        if (typeof showToast === 'function') showToast(err.message || 'Ошибка удаления', 'error');
+                        try { if (typeof handlers.undo === 'function') handlers.undo(); } catch (e2) {}
+                    }
+                }, 250);
             }
         }
     }, 1000);
@@ -629,8 +711,15 @@ function confirmDelete(message, onConfirm) {
         cancelled = true;
         clearInterval(interval);
         t.style.opacity = '0';
-        setTimeout(() => t.remove(), 300);
-        showToast('Удаление отменено', 'info');
+        setTimeout(() => {
+            t.remove();
+            UndoDeleteStack.items = UndoDeleteStack.items.filter(x => x !== t);
+            UndoDeleteStack.layout();
+        }, 250);
+        try {
+            if (typeof handlers.undo === 'function') handlers.undo();
+            else if (typeof showToast === 'function') showToast('Удаление отменено', 'info');
+        } catch (e) { console.error(e); }
     });
 }
 
@@ -969,12 +1058,122 @@ function escapeHtmlAttr(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+/** Normalize checklist items to Jira-like action items (no <input> in contenteditable) */
+function normalizeChecklistHtml(root) {
+    root.querySelectorAll('ul.rich-checklist, ul').forEach(ul => {
+        const looksLikeCheck = ul.classList.contains('rich-checklist') ||
+            ul.querySelector('input[type="checkbox"], .rich-check, li[data-checked]');
+        if (!looksLikeCheck) return;
+        ul.classList.add('rich-checklist');
+        [...ul.children].forEach(li => {
+            if (li.tagName !== 'LI') return;
+            li.classList.add('rich-check-item');
+            let checked = li.getAttribute('data-checked') === 'true';
+            const oldInput = li.querySelector('input[type="checkbox"]');
+            if (oldInput) {
+                checked = oldInput.checked || oldInput.hasAttribute('checked');
+                oldInput.remove();
+            }
+            li.setAttribute('data-checked', checked ? 'true' : 'false');
+            let box = li.querySelector('.rich-check');
+            if (!box) {
+                box = document.createElement('span');
+                box.className = 'rich-check';
+                box.setAttribute('contenteditable', 'false');
+                li.insertBefore(box, li.firstChild);
+            } else {
+                box.setAttribute('contenteditable', 'false');
+            }
+            // Wrap leftover text into label span if needed
+            let label = li.querySelector('.rich-check-label');
+            if (!label) {
+                label = document.createElement('span');
+                label.className = 'rich-check-label';
+                const nodes = [...li.childNodes].filter(n => n !== box);
+                nodes.forEach(n => label.appendChild(n));
+                if (!label.textContent.trim()) label.innerHTML = '<br>';
+                li.appendChild(label);
+            }
+            if (checked) li.classList.add('is-checked');
+            else li.classList.remove('is-checked');
+        });
+    });
+}
+
+function guessFileKind(name, mime) {
+    const m = String(mime || '').toLowerCase();
+    const ext = String(name || '').split('.').pop().toLowerCase();
+    if (m.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext)) return 'image';
+    if (m.startsWith('video/') || ['mp4','webm','ogg','mov','m4v'].includes(ext)) return 'video';
+    if (m === 'application/pdf' || ext === 'pdf') return 'pdf';
+    if (m.startsWith('text/') || ['txt','md','csv','json','log','xml','html','css','js'].includes(ext)) return 'text';
+    return 'file';
+}
+
+/** Add auth token for /uploads so <img>/<iframe> can load files */
+function authedUploadUrl(url) {
+    const u = String(url || '');
+    if (!u.startsWith('/uploads/')) return u;
+    const token = (typeof API !== 'undefined' && API.token) || localStorage.getItem('crm_token') || '';
+    if (!token) return u;
+    const base = u.split('?')[0];
+    return base + '?token=' + encodeURIComponent(token);
+}
+
+/**
+ * Inline file/media in the editor — one selectable unit (Ctrl+C / Delete / Backspace).
+ * mode=link → chip link; mode=embed → image/video/pdf preview.
+ */
+function buildRichAttachHtml({ url, name, mime, mode = 'link' }) {
+    const rawUrl = String(url || '').split('?')[0].replace(/"/g, '');
+    const safeUrl = authedUploadUrl(rawUrl);
+    const safeName = escapeHtmlText(name || 'Файл');
+    const safeMime = escapeHtmlText(mime || '');
+    const kind = guessFileKind(name, mime);
+    const viewUrl = '/pages/file-viewer.html?src=' + encodeURIComponent(rawUrl) +
+        '&name=' + encodeURIComponent(name || 'Файл') +
+        '&kind=' + encodeURIComponent(kind);
+    const modeVal = mode === 'embed' ? 'embed' : 'link';
+
+    let inner = '';
+    if (modeVal === 'embed' && kind === 'image') {
+        inner = `<img class="rich-attach-media" src="${safeUrl}" alt="${safeName}" data-view="${viewUrl}">`;
+    } else if (modeVal === 'embed' && kind === 'video') {
+        inner = `<video class="rich-attach-media" src="${safeUrl}" controls preload="metadata" data-view="${viewUrl}"></video>`;
+    } else if (modeVal === 'embed' && kind === 'pdf') {
+        inner = `<span class="rich-attach-pdf" data-view="${viewUrl}" title="Открыть PDF">📄 ${safeName}</span>`;
+    } else {
+        inner = `<a class="rich-attach-link" href="${safeUrl}" download="${safeName}" data-view="${viewUrl}">📎 ${safeName}</a>`;
+    }
+
+    return `<span class="rich-attach" contenteditable="false" data-file="${rawUrl}" data-name="${safeName}" data-mime="${safeMime}" data-kind="${kind}" data-mode="${modeVal}" data-view="${viewUrl}">${inner}<span class="rich-attach-mode" data-set-mode="${modeVal === 'embed' ? 'link' : 'embed'}" title="Переключить вид">${modeVal === 'embed' ? '🔗' : '👁'}</span></span>`;
+}
+
 function sanitizeRichHtml(html) {
     if (!html) return '';
     const div = document.createElement('div');
     div.innerHTML = html;
-    // Interactive nodes break drag-and-drop and card layout — strip them
-    div.querySelectorAll('script,iframe,object,embed,link,style,input,textarea,select,button,form').forEach(n => n.remove());
+    // Strip dangerous nodes; checkboxes use span.rich-check (Jira-style), not <input>
+    // Keep iframes only inside .rich-attach (PDF preview)
+    div.querySelectorAll('script,object,embed,link,style,textarea,select,button,form').forEach(n => n.remove());
+    div.querySelectorAll('iframe').forEach(n => {
+        if (!n.closest('.rich-attach')) n.remove();
+    });
+    div.querySelectorAll('input').forEach(n => {
+        // Convert legacy checkbox inputs before remove
+        if ((n.type || '').toLowerCase() === 'checkbox') {
+            const li = n.closest('li');
+            if (li) {
+                const checked = n.checked || n.hasAttribute('checked');
+                li.setAttribute('data-checked', checked ? 'true' : 'false');
+                li.classList.add('rich-check-item');
+                const ul = li.closest('ul');
+                if (ul) ul.classList.add('rich-checklist');
+            }
+        }
+        n.remove();
+    });
+    normalizeChecklistHtml(div);
     div.querySelectorAll('*').forEach(el => {
         [...el.attributes].forEach(a => {
             if (/^on/i.test(a.name) || ((a.name === 'href' || a.name === 'src') && /^\s*javascript:/i.test(a.value))) {
@@ -982,8 +1181,29 @@ function sanitizeRichHtml(html) {
             }
         });
         if (el.tagName === 'A') el.setAttribute('draggable', 'false');
+        // Keep contenteditable=false on check boxes / attachments
+        if (el.classList && (el.classList.contains('rich-check') || el.classList.contains('rich-attach'))) {
+            el.setAttribute('contenteditable', 'false');
+        }
+    });
+    // Rebuild attach blocks from data attrs (keeps modes consistent after sanitize)
+    div.querySelectorAll('.rich-attach').forEach(block => {
+        const url = block.getAttribute('data-file') || '';
+        const name = block.getAttribute('data-name') || 'Файл';
+        const mime = block.getAttribute('data-mime') || '';
+        const mode = block.getAttribute('data-mode') || 'link';
+        if (!url) { block.remove(); return; }
+        const tmp = document.createElement('div');
+        tmp.innerHTML = buildRichAttachHtml({ url, name, mime, mode });
+        const next = tmp.querySelector('.rich-attach');
+        if (next) block.replaceWith(next);
     });
     return div.innerHTML;
+}
+
+function makeChecklistItemHtml(text = '', checked = false) {
+    const label = text ? escapeHtmlText(text) : '<br>';
+    return `<li class="rich-check-item${checked ? ' is-checked' : ''}" data-checked="${checked ? 'true' : 'false'}"><span class="rich-check" contenteditable="false"></span><span class="rich-check-label">${label}</span></li>`;
 }
 
 function escapeHtmlText(s) {
@@ -1061,19 +1281,19 @@ function renderPriorityMark(priority) {
 }
 
 /**
- * Compact description preview (plain text) — safe for drag-and-drop cards.
- * Clicking the chevron toggles; does not navigate / start drag.
+ * Compact rich description preview for cards (headings/lists kept).
+ * Interactive nodes are inert; chevron toggles expand. DnD-safe via CSS.
  */
 function renderDescClamp(html, { lines = 3, id } = {}) {
     const text = stripHtmlText(html);
     if (!text) return '';
     const cid = id || ('dc_' + Math.random().toString(36).slice(2, 9));
-    const long = text.length > 90;
-    // Plain text only: rich HTML (checkbox/links/headings) breaks DnD and layout
+    const long = text.length > 90 || /<(h[1-6]|ul|ol|li|br|p)\b/i.test(html || '');
+    const rich = renderRichHtml(html);
     return `<div class="desc-clamp-wrap${long ? '' : ' desc-short'}" data-desc-clamp="${cid}">
         <div class="desc-clamp-row">
-            <div class="desc-clamp" id="${cid}" style="--desc-lines:${lines}">${escapeHtmlText(text)}</div>
-            ${long ? `<button type="button" class="desc-clamp-btn" onclick="event.stopPropagation();toggleDescClamp(this)" title="Развернуть" aria-label="Развернуть описание">
+            <div class="desc-clamp rich-content" id="${cid}" style="--desc-lines:${lines}">${rich}</div>
+            ${long ? `<button type="button" class="desc-clamp-btn" onclick="event.preventDefault();event.stopPropagation();toggleDescClamp(this);return false;" title="Развернуть" aria-label="Развернуть описание">
                 <svg class="chev-down" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>
                 <svg class="chev-up" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg>
             </button>` : ''}
@@ -1081,20 +1301,30 @@ function renderDescClamp(html, { lines = 3, id } = {}) {
     </div>`;
 }
 
-window.toggleDescClamp = function(btn) {
+window.toggleDescClamp = function(btn, ev) {
+    if (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+    }
     const wrap = btn && btn.closest ? btn.closest('.desc-clamp-wrap') : null;
     if (!wrap) return;
     wrap.classList.toggle('expanded');
     const open = wrap.classList.contains('expanded');
     btn.title = open ? 'Свернуть' : 'Развернуть';
     btn.setAttribute('aria-label', open ? 'Свернуть описание' : 'Развернуть описание');
+    return false;
 };
 
-function renderRichEditor(id, value = '', placeholder = 'Текст…') {
+/**
+ * opts.fullPreview — show full description when collapsed (no clamp),
+ *   but editor still opens on click and closes on outside click.
+ */
+function renderRichEditor(id, value = '', placeholder = 'Текст…', opts = {}) {
+    const fullPreview = !!(opts && (opts.fullPreview || opts.alwaysOpen));
     const body = plainOrHtmlToRich(value);
     const empty = !stripHtmlText(value);
     return `
-    <div class="rich-editor rich-collapsed" data-rich-wrap="${id}" data-placeholder="${escapeHtmlAttr(placeholder)}">
+    <div class="rich-editor rich-collapsed${fullPreview ? ' rich-full-preview' : ''}" data-rich-wrap="${id}" data-placeholder="${escapeHtmlAttr(placeholder)}"${fullPreview ? ' data-full-preview="1"' : ''}>
         <div class="rich-toolbar" data-rich-toolbar="${id}">
             <button type="button" data-cmd="bold" title="Жирный (Ctrl+B)"><b>B</b></button>
             <button type="button" data-cmd="italic" title="Курсив (Ctrl+I)"><i>I</i></button>
@@ -1107,14 +1337,16 @@ function renderRichEditor(id, value = '', placeholder = 'Текст…') {
             <span class="rich-sep"></span>
             <button type="button" data-cmd="insertUnorderedList" title="Маркированный список">•</button>
             <button type="button" data-cmd="insertOrderedList" title="Нумерованный список">1.</button>
-            <button type="button" data-cmd="checklist" title="Чекбоксы">☑</button>
+            <button type="button" data-cmd="checklist" title="Чеклист (как в Jira)">☑</button>
             <span class="rich-sep"></span>
             <button type="button" data-cmd="justifyLeft" title="По левому краю">⇤</button>
             <button type="button" data-cmd="justifyCenter" title="По центру">≡</button>
             <button type="button" data-cmd="createLink" title="Ссылка">URL</button>
+            <button type="button" data-cmd="attach" title="Прикрепить файл">📎</button>
             <button type="button" data-cmd="removeFormat" title="Очистить формат">Tx</button>
             <button type="button" class="rich-done-btn" data-cmd="done" title="Готово">Готово</button>
         </div>
+        <input type="file" class="rich-attach-input" data-rich-file="${id}" hidden accept="*/*">
         <div class="rich-body${empty ? ' rich-empty' : ''}" id="${id}" contenteditable="false" data-placeholder="${escapeHtmlAttr(placeholder)}" role="textbox">${empty ? '' : body}</div>
     </div>`;
 }
@@ -1146,13 +1378,21 @@ function bindRichEditor(id, { onBlur, onChange } = {}) {
         return !wrap.classList.contains('rich-collapsed');
     }
 
+    function emitChange() {
+        const html = getRichEditorValue(id);
+        if (typeof onChange === 'function') onChange(html);
+    }
+
     function openEditor() {
-        if (isOpen()) return;
+        if (isOpen() && body.contentEditable === 'true') return;
         wrap.classList.remove('rich-collapsed');
         wrap.dataset.richOpen = '1';
         if (body.classList.contains('rich-empty')) {
             body.classList.remove('rich-empty');
             body.innerHTML = '';
+        } else if (body.innerHTML) {
+            // Normalize any legacy checkboxes
+            body.innerHTML = sanitizeRichHtml(body.innerHTML);
         }
         body.contentEditable = 'true';
         body.focus();
@@ -1174,8 +1414,54 @@ function bindRichEditor(id, { onBlur, onChange } = {}) {
         if (save && typeof onBlur === 'function') onBlur(html);
     }
 
+    function findChecklistNearCaret() {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+            let n = sel.anchorNode;
+            if (n && n.nodeType === 3) n = n.parentElement;
+            const existing = n && n.closest ? n.closest('ul.rich-checklist') : null;
+            if (existing && body.contains(existing)) return existing;
+        }
+        return body.querySelector('ul.rich-checklist');
+    }
+
+    function insertChecklist() {
+        body.classList.remove('rich-empty');
+        const existing = findChecklistNearCaret();
+        if (existing) {
+            const li = document.createElement('li');
+            li.className = 'rich-check-item';
+            li.setAttribute('data-checked', 'false');
+            li.innerHTML = '<span class="rich-check" contenteditable="false"></span><span class="rich-check-label"><br></span>';
+            existing.appendChild(li);
+            placeCaretInLabel(li.querySelector('.rich-check-label'));
+        } else {
+            document.execCommand('insertHTML', false,
+                '<ul class="rich-checklist">' + makeChecklistItemHtml('') + '</ul>');
+        }
+        emitChange();
+    }
+
+    function placeCaretInLabel(label) {
+        if (!label) return;
+        const range = document.createRange();
+        const sel = window.getSelection();
+        range.selectNodeContents(label);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+
+    function toggleCheckItem(li) {
+        if (!li) return;
+        const on = li.getAttribute('data-checked') === 'true';
+        li.setAttribute('data-checked', on ? 'false' : 'true');
+        li.classList.toggle('is-checked', !on);
+        emitChange();
+        // onChange already notifies; no-op here
+    }
+
     wrap.querySelectorAll('[data-cmd]').forEach(btn => {
-        // Keep focus in editor when using toolbar — never close on button press
         btn.addEventListener('mousedown', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -1191,27 +1477,209 @@ function bindRichEditor(id, { onBlur, onChange } = {}) {
             }
             body.focus();
             if (cmd === 'checklist') {
-                document.execCommand('insertHTML', false,
-                    '<ul class="rich-checklist"><li><input type="checkbox"> пункт</li></ul>');
+                insertChecklist();
                 return;
             }
             if (cmd === 'createLink') {
                 const url = prompt('Ссылка (https://…)', 'https://');
                 if (url) document.execCommand('createLink', false, url);
                 body.focus();
+                emitChange();
+                return;
+            }
+            if (cmd === 'attach') {
+                const input = wrap.querySelector('.rich-attach-input');
+                if (input) input.click();
                 return;
             }
             if (cmd === 'formatBlock') {
                 document.execCommand('formatBlock', false, btn.dataset.val || 'h3');
+                emitChange();
                 return;
             }
             document.execCommand(cmd, false, btn.dataset.val || null);
+            emitChange();
         });
     });
 
-    body.addEventListener('click', (e) => {
-        if (e.target && e.target.matches('input[type="checkbox"]')) {
+    async function uploadAndInsertFile(file) {
+        if (!file) return;
+        const maxBytes = 30 * 1024 * 1024;
+        if (file.size > maxBytes) {
+            throw new Error('«' + file.name + '»: больше 30 МБ (' + Math.round(file.size / 1024 / 1024) + ' МБ)');
+        }
+        if (!isOpen()) openEditor();
+        const fd = new FormData();
+        fd.append('file', file);
+        let uploaded;
+        try {
+            uploaded = await API.uploadFile(fd);
+        } catch (e1) {
+            // Fallback
+            try {
+                const fd2 = new FormData();
+                fd2.append('file', file);
+                fd2.append('title', file.name);
+                fd2.append('kind', 'file');
+                const page = await API.uploadWikiPage(fd2);
+                if (!page || !page.file_path) throw e1;
+                uploaded = {
+                    url: '/uploads/' + page.file_path,
+                    originalname: page.title || file.name,
+                    mimetype: file.type || '',
+                    size: file.size
+                };
+            } catch (e2) {
+                throw new Error(e1.message || e2.message || 'Ошибка загрузки');
+            }
+        }
+        if (!uploaded || !uploaded.url) throw new Error('Сервер не вернул URL файла');
+        const html = buildRichAttachHtml({
+            url: uploaded.url,
+            name: uploaded.originalname || file.name,
+            mime: uploaded.mimetype || file.type || '',
+            mode: guessFileKind(file.name, file.type) === 'image' ? 'embed' : 'link'
+        });
+        body.classList.remove('rich-empty');
+        body.focus();
+        const chunk = '\u200B' + html + '\u200B';
+        let inserted = false;
+        try {
+            inserted = document.execCommand('insertHTML', false, chunk);
+        } catch (e) { inserted = false; }
+        if (!inserted) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = chunk;
+            while (tmp.firstChild) body.appendChild(tmp.firstChild);
+        }
+        body.innerHTML = sanitizeRichHtml(body.innerHTML);
+        emitChange();
+        return uploaded;
+    }
+
+    // Expose for page-level file strip
+    wrap._uploadAndInsertFile = uploadAndInsertFile;
+
+    const fileInput = wrap.querySelector('.rich-attach-input');
+    if (fileInput) {
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files && fileInput.files[0];
+            fileInput.value = '';
+            if (!file) return;
+            if (typeof showToast === 'function') showToast('Загрузка: ' + file.name + '…', 'info');
+            try {
+                await uploadAndInsertFile(file);
+                if (typeof showToast === 'function') showToast('Файл прикреплён: ' + file.name, 'success');
+            } catch (err) {
+                console.error('Attach upload failed', err);
+                if (typeof showToast === 'function') showToast(err.message || 'Ошибка загрузки', 'error');
+            }
+        });
+    }
+
+    // Drag & drop files from explorer into editor
+    function isFileDrag(e) {
+        const dt = e.dataTransfer;
+        if (!dt) return false;
+        const types = dt.types ? [...dt.types] : [];
+        return types.includes('Files') || (dt.files && dt.files.length > 0);
+    }
+    async function handleFileDrop(e) {
+        if (!isFileDrag(e)) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        wrap.classList.remove('rich-drop-active');
+        const files = [...(e.dataTransfer.files || [])];
+        if (!files.length) return true;
+        for (const file of files) {
+            try {
+                if (typeof showToast === 'function') showToast('Загрузка: ' + file.name + '…', 'info');
+                await uploadAndInsertFile(file);
+                if (typeof showToast === 'function') showToast('Файл прикреплён: ' + file.name, 'success');
+            } catch (err) {
+                if (typeof showToast === 'function') showToast(err.message || 'Ошибка загрузки', 'error');
+            }
+        }
+        return true;
+    }
+    const fileDropOpts = { capture: true };
+    ['dragenter', 'dragover'].forEach(evName => {
+        wrap.addEventListener(evName, (e) => {
+            if (!isFileDrag(e)) return;
+            e.preventDefault();
             e.stopPropagation();
+            try { e.dataTransfer.dropEffect = 'copy'; } catch (err) {}
+            wrap.classList.add('rich-drop-active');
+            if (!isOpen()) openEditor();
+        }, fileDropOpts);
+    });
+    wrap.addEventListener('dragleave', (e) => {
+        if (!wrap.contains(e.relatedTarget)) wrap.classList.remove('rich-drop-active');
+    }, fileDropOpts);
+    wrap.addEventListener('drop', (e) => { handleFileDrop(e); }, fileDropOpts);
+
+    function openAttachViewer(el) {
+        const node = el.closest('[data-view]') || el.closest('.rich-attach');
+        const view = node && (node.getAttribute('data-view') || '');
+        if (view) {
+            window.open(view, '_blank', 'noopener');
+            return true;
+        }
+        return false;
+    }
+
+    function setAttachMode(block, mode) {
+        if (!block) return;
+        const url = block.getAttribute('data-file');
+        const name = block.getAttribute('data-name') || 'Файл';
+        const mime = block.getAttribute('data-mime') || '';
+        const tmp = document.createElement('div');
+        tmp.innerHTML = buildRichAttachHtml({ url, name, mime, mode });
+        const next = tmp.querySelector('.rich-attach');
+        if (next) {
+            block.replaceWith(next);
+            emitChange();
+        }
+    }
+
+    function selectAttachNode(attach) {
+        if (!attach) return;
+        const range = document.createRange();
+        range.selectNode(attach);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+
+    body.addEventListener('click', (e) => {
+        const attach = e.target && e.target.closest ? e.target.closest('.rich-attach') : null;
+        if (attach && body.contains(attach)) {
+            if (!isOpen()) openEditor();
+            const modeBtn = e.target.closest('.rich-attach-mode');
+            if (modeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                setAttachMode(attach, modeBtn.getAttribute('data-set-mode') || 'link');
+                return;
+            }
+            // Double-click / Alt+click → open fullscreen viewer
+            if (e.detail >= 2 || e.altKey) {
+                e.preventDefault();
+                openAttachViewer(attach);
+                return;
+            }
+            // Single click → select whole file (for copy/delete)
+            e.preventDefault();
+            e.stopPropagation();
+            selectAttachNode(attach);
+            return;
+        }
+        const check = e.target && e.target.closest ? e.target.closest('.rich-check') : null;
+        if (check && body.contains(check)) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!isOpen()) openEditor();
+            toggleCheckItem(check.closest('li.rich-check-item'));
             return;
         }
         if (!isOpen()) {
@@ -1227,35 +1695,214 @@ function bindRichEditor(id, { onBlur, onChange } = {}) {
         }
     });
 
-    body.addEventListener('mousedown', (e) => {
-        if (e.target && e.target.matches('input[type="checkbox"]')) e.stopPropagation();
+    // Copy selected attach as HTML + plain name/URL (Ctrl+C)
+    body.addEventListener('copy', (e) => {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+        const range = sel.getRangeAt(0);
+        let attach = null;
+        if (range.startContainer === range.endContainer &&
+            range.startContainer.nodeType === 1 &&
+            range.startContainer.classList?.contains('rich-attach')) {
+            attach = range.startContainer;
+        } else {
+            const el = range.commonAncestorContainer.nodeType === 1
+                ? range.commonAncestorContainer
+                : range.commonAncestorContainer.parentElement;
+            attach = el && el.closest ? el.closest('.rich-attach') : null;
+            if (!attach) {
+                const frag = range.cloneContents();
+                attach = frag.querySelector && frag.querySelector('.rich-attach');
+                // Prefer live node in editor if selected via selectNodeContents-ish
+                if (attach) {
+                    const url = attach.getAttribute('data-file');
+                    attach = url ? body.querySelector('.rich-attach[data-file="' + CSS.escape(url) + '"]') || attach : attach;
+                }
+            }
+        }
+        if (!attach) return;
+        const url = attach.getAttribute('data-file') || '';
+        const name = attach.getAttribute('data-name') || 'Файл';
+        const html = attach.outerHTML || '';
+        e.clipboardData.setData('text/plain', name + (url ? '\n' + url : ''));
+        if (html) e.clipboardData.setData('text/html', html);
+        e.preventDefault();
     });
-    body.addEventListener('change', (e) => {
-        if (e.target && e.target.matches('input[type="checkbox"]')) {
-            if (e.target.checked) e.target.setAttribute('checked', '');
-            else e.target.removeAttribute('checked');
-            if (typeof onChange === 'function') onChange(getRichEditorValue(id));
-            else if (typeof onBlur === 'function' && !isOpen()) onBlur(getRichEditorValue(id));
+
+    // Keyboard: delete/copy selected attach; checklist Enter; Backspace near attach
+    body.addEventListener('keydown', (e) => {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return;
+
+        // If selection is (or contains) a rich-attach — Delete/Backspace removes it
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+            const range = sel.getRangeAt(0);
+            let attach = null;
+            if (!sel.isCollapsed) {
+                const container = range.commonAncestorContainer;
+                const el = container.nodeType === 1 ? container : container.parentElement;
+                attach = el && el.closest ? el.closest('.rich-attach') : null;
+                if (!attach && el) attach = el.querySelector && range.cloneContents().querySelector('.rich-attach');
+                // Also: selected node is the attach itself
+                if (!attach && range.startContainer === range.endContainer) {
+                    const n = range.startContainer;
+                    if (n.nodeType === 1 && n.classList && n.classList.contains('rich-attach')) attach = n;
+                    if (n.childNodes && n.childNodes[range.startOffset] &&
+                        n.childNodes[range.startOffset].classList &&
+                        n.childNodes[range.startOffset].classList.contains('rich-attach')) {
+                        attach = n.childNodes[range.startOffset];
+                    }
+                }
+            } else {
+                // Collapsed caret: Backspace removes attach before caret; Delete removes after
+                const node = sel.anchorNode;
+                const offset = sel.anchorOffset;
+                if (e.key === 'Backspace') {
+                    if (node.nodeType === 3 && offset === 0) {
+                        let prev = node.previousSibling;
+                        if (!prev && node.parentElement) prev = node.parentElement.previousSibling;
+                        if (prev && prev.classList && prev.classList.contains('rich-attach')) attach = prev;
+                    } else if (node.nodeType === 1 && offset > 0) {
+                        const prev = node.childNodes[offset - 1];
+                        if (prev && prev.classList && prev.classList.contains('rich-attach')) attach = prev;
+                    }
+                } else if (e.key === 'Delete') {
+                    if (node.nodeType === 3 && offset === (node.textContent || '').length) {
+                        let next = node.nextSibling;
+                        if (!next && node.parentElement) next = node.parentElement.nextSibling;
+                        if (next && next.classList && next.classList.contains('rich-attach')) attach = next;
+                    } else if (node.nodeType === 1) {
+                        const next = node.childNodes[offset];
+                        if (next && next.classList && next.classList.contains('rich-attach')) attach = next;
+                    }
+                }
+            }
+            if (attach && body.contains(attach)) {
+                e.preventDefault();
+                attach.remove();
+                emitChange();
+                return;
+            }
+        }
+
+        let n = sel.anchorNode;
+        if (n && n.nodeType === 3) n = n.parentElement;
+        const li = n && n.closest ? n.closest('li.rich-check-item') : null;
+        if (!li || !body.contains(li)) return;
+        const label = li.querySelector('.rich-check-label');
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const next = document.createElement('li');
+            next.className = 'rich-check-item';
+            next.setAttribute('data-checked', 'false');
+            next.innerHTML = '<span class="rich-check" contenteditable="false"></span><span class="rich-check-label"><br></span>';
+            li.after(next);
+            placeCaretInLabel(next.querySelector('.rich-check-label'));
+            emitChange();
+            return;
+        }
+        if (e.key === 'Backspace' && label && !(label.textContent || '').trim()) {
+            e.preventDefault();
+            const prev = li.previousElementSibling;
+            const ul = li.parentElement;
+            li.remove();
+            if (ul && !ul.querySelector('li')) ul.remove();
+            if (prev) placeCaretInLabel(prev.querySelector('.rich-check-label'));
+            emitChange();
         }
     });
 
-    // Close ONLY on click outside the editor (not on focus loss / toolbar)
+    body.addEventListener('input', () => emitChange());
+
+    // Close on outside click — skip modal action buttons
     const onDocPointer = (e) => {
         if (!isOpen()) return;
         if (wrap.contains(e.target)) return;
+        if (e.target.closest && e.target.closest('.modal-footer, .modal-close, .btn-primary, .btn-secondary, .btn-danger')) return;
         closeEditor(true);
     };
     document.addEventListener('mousedown', onDocPointer, true);
     wrap._richOutsideClose = onDocPointer;
-
-    if (typeof onChange === 'function') {
-        body.addEventListener('input', () => onChange(getRichEditorValue(id)));
-    }
 }
+
+// ==================== DRAFT AUTOSAVE (create forms) ====================
+window.DraftStore = {
+    _key(name) { return 'crm_draft_' + name; },
+    save(name, data) {
+        try {
+            localStorage.setItem(this._key(name), JSON.stringify({ t: Date.now(), data }));
+        } catch (e) {}
+    },
+    load(name) {
+        try {
+            const raw = localStorage.getItem(this._key(name));
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed && parsed.data != null ? parsed.data : null;
+        } catch (e) { return null; }
+    },
+    clear(name) {
+        try { localStorage.removeItem(this._key(name)); } catch (e) {}
+    },
+    /** Bind autosave on a modal form. collect() → object, apply(data) fills fields. */
+    bind(name, collect, apply) {
+        const draft = this.load(name);
+        if (draft && typeof apply === 'function') {
+            try { apply(draft); } catch (e) {}
+        }
+        const save = () => {
+            try { this.save(name, collect()); } catch (e) {}
+        };
+        const overlay = document.getElementById('modalOverlay');
+        if (!overlay) return save;
+        const modal = overlay.querySelector('.modal');
+        if (modal) modal.setAttribute('data-draft-key', name);
+        const onAny = () => {
+            if (!overlay.classList.contains('show')) return;
+            save();
+        };
+        overlay.addEventListener('input', onAny);
+        overlay.addEventListener('change', onAny);
+        if (overlay._draftTimer) clearInterval(overlay._draftTimer);
+        const timer = setInterval(() => {
+            if (!overlay.classList.contains('show')) {
+                clearInterval(timer);
+                overlay.removeEventListener('input', onAny);
+                overlay.removeEventListener('change', onAny);
+                if (overlay._draftTimer === timer) overlay._draftTimer = null;
+                return;
+            }
+            save();
+        }, 1500);
+        overlay._draftTimer = timer;
+        return save;
+    }
+};
 
 /** True if any rich editor is currently open (expanded) */
 function isAnyRichEditorOpen() {
     return !!document.querySelector('.rich-editor[data-rich-open="1"]');
+}
+
+/** Collapse open editors (keeps HTML via getDescValue-compatible state) */
+function flushAllRichEditors() {
+    document.querySelectorAll('.rich-editor[data-rich-open="1"]').forEach(wrap => {
+        const id = wrap.getAttribute('data-rich-wrap');
+        if (!id) return;
+        const body = document.getElementById(id);
+        if (!body) return;
+        const html = getRichEditorValue(id);
+        body.contentEditable = 'false';
+        wrap.classList.add('rich-collapsed');
+        delete wrap.dataset.richOpen;
+        if (!stripHtmlText(html)) {
+            body.innerHTML = '';
+            body.classList.add('rich-empty');
+        } else {
+            body.classList.remove('rich-empty');
+            body.innerHTML = sanitizeRichHtml(html);
+        }
+    });
 }
 
 // Initialize when DOM is ready

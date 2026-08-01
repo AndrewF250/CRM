@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Проекты — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=16">
+    <link rel="stylesheet" href="/assets/css/style.css?v=38">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=16"></script>
-    <script src="/assets/js/app.js?v=16"></script>
-    <script src="/assets/js/crm-data.js?v=16"></script>
+    <script src="/assets/js/api.js?v=18"></script>
+    <script src="/assets/js/app.js?v=34"></script>
+    <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -210,14 +210,23 @@
         };
         
         window.deleteProject = async function(id) {
-            confirmDelete('Удалить проект и все его задачи?', async () => {
-                try {
+            const project = CRM.getProject ? CRM.getProject(id) : (CRM.getProjects() || []).find(p => p.id === id);
+            const name = project ? project.name : 'Проект';
+            confirmDelete('Проект «' + name + '» удалён', {
+                optimistic: () => {
+                    if (CRM._cache && Array.isArray(CRM._cache.projects)) {
+                        CRM._cache.projects = CRM._cache.projects.filter(p => p.id !== id);
+                    }
+                    renderProjects();
+                },
+                commit: async () => {
                     await API.deleteProject(id);
-                    showToast('Проект удалён', 'success');
                     await CRM.load();
                     renderProjects();
-                } catch (err) {
-                    showToast('Ошибка: ' + err.message, 'error');
+                },
+                undo: async () => {
+                    await CRM.load();
+                    renderProjects();
                 }
             });
         };
@@ -269,7 +278,7 @@
                 colProjects.forEach(p => {
                     const adeqEmoji = { 'good': '😊', 'warn': '😐', 'bad': '😡' };
                     kanbanHtml += `<div class="kanban-card${p.urgent ? ' urgent' : ''}" draggable="true" data-project-id="${p.id}">
-                        <a href="/pages/project.html?id=${p.id}" style="text-decoration:none;color:inherit;display:block;" onclick="event.stopPropagation()">
+                        <a href="/pages/project.html?id=${p.id}" class="kanban-card-link" style="text-decoration:none;color:inherit;display:block;" onclick="if(event.target.closest('.desc-clamp-wrap,.desc-clamp-btn')){event.preventDefault();event.stopPropagation();}">
                             <div style="display:flex;justify-content:space-between;align-items:start;">
                                 <div class="kanban-card-title">${p.name}</div>
                                 <div style="display:flex;align-items:center;gap:4px;">
@@ -279,6 +288,9 @@
                                 </div>
                             </div>
                             <div class="kanban-card-client">${p.client}${p.phone ? ' · ' + p.phone : ''}</div>
+                        </a>
+                        ${p.description ? '<div class="kanban-card-desc" onclick="event.preventDefault();event.stopPropagation();">' + renderDescClamp(p.description, { lines: 2, id: 'dproj_' + p.id }) + '</div>' : ''}
+                        <a href="/pages/project.html?id=${p.id}" class="kanban-card-link" style="text-decoration:none;color:inherit;display:block;" onclick="if(event.target.closest('.desc-clamp-wrap,.desc-clamp-btn')){event.preventDefault();event.stopPropagation();}">
                             ${renderTeamAvatars(p.team, false)}
                             ${(p.hashtags && p.hashtags.length > 0) ? '<div class="hashtags" style="margin:4px 0;">' + p.hashtags.map(h => '<span class="hashtag">' + h + '</span>').join('') + '</div>' : ''}
                             <div class="kanban-card-footer"><span class="kanban-card-status"><span class="status-dot" style="background:${hex}"></span> ${col.name}</span><span class="kanban-card-amount">${formatAmountInput(p.amount)} ₽</span></div>
@@ -375,41 +387,66 @@
             });
         }
         
+        function collectNewProjectDraft() {
+            return {
+                name: document.getElementById('newProjectName')?.value || '',
+                client: document.getElementById('newProjectClient')?.value || '',
+                phone: document.getElementById('newProjectPhone')?.value || '',
+                amount: document.getElementById('newProjectAmount')?.value || '',
+                deadline: document.getElementById('newProjectDeadline')?.value || '',
+                payDate: document.getElementById('newProjectPayDate')?.value || '',
+                status: document.getElementById('newProjectStatus')?.value || '',
+                assignee: document.getElementById('newProjectAssignee')?.value || '',
+                source: document.getElementById('newProjectSource')?.value || '',
+                adequacy: document.getElementById('newProjectAdequacy')?.value || 'good',
+                hashtags: document.getElementById('newProjectHashtags')?.value || '',
+                description: getDescValue('newProjectDescription')
+            };
+        }
+
         window.showNewProjectModal = function() {
             const overlay = document.getElementById('modalOverlay');
             const currentUser = API.getCurrentUser();
-            const assigneeOpts = ['Костя', 'Максим', 'Андрей'].map(p => `<option${currentUser && currentUser.name === p ? ' selected' : ''}>${p}</option>`).join('');
+            const d = DraftStore.load('new_project') || {};
+            const assigneeOpts = ['Костя', 'Максим', 'Андрей'].map(p => {
+                const sel = (d.assignee || (currentUser && currentUser.name) || '') === p ? ' selected' : '';
+                return `<option${sel}>${p}</option>`;
+            }).join('');
+            const statusOpts = (kanbanColumns.length ? kanbanColumns : [{name:'Новый'},{name:'Переговоры'},{name:'В работе'}])
+                .map(c => `<option${(d.status || '') === c.name ? ' selected' : ''}>${c.name}</option>`).join('');
+            const esc = (s) => String(s || '').replace(/"/g, '&quot;');
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новый проект</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новый проект</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newProjectName">Название *</label><input type="text" class="form-input" id="newProjectName" placeholder="Название проекта" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newProjectClient">Клиент *</label><input type="text" class="form-input" id="newProjectClient" placeholder="Имя клиента" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newProjectName">Название *</label><input type="text" class="form-input" id="newProjectName" value="${esc(d.name)}" placeholder="Название проекта" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newProjectClient">Клиент *</label><input type="text" class="form-input" id="newProjectClient" value="${esc(d.client)}" placeholder="Имя клиента" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newProjectPhone">Телефон</label><input type="tel" class="form-input" id="newProjectPhone" placeholder="+7 (999) 123-45-67" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newProjectAmount">Сумма (₽)</label><input type="text" class="form-input" id="newProjectAmount" placeholder="0" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()" oninput="formatAmountField(this)"></div>
+                            <div class="form-group"><label class="form-label" for="newProjectPhone">Телефон</label><input type="tel" class="form-input" id="newProjectPhone" value="${esc(d.phone)}" placeholder="+7 (999) 123-45-67" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newProjectAmount">Сумма (₽)</label><input type="text" class="form-input" id="newProjectAmount" value="${esc(d.amount)}" placeholder="0" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()" oninput="formatAmountField(this)"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newProjectDeadline">Дедлайн</label><input type="date" class="form-input" id="newProjectDeadline" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newProjectPayDate">Дата оплаты</label><input type="date" class="form-input" id="newProjectPayDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newProjectStatus">Статус</label><select class="form-select" id="newProjectStatus" onclick="event.stopPropagation()">${(kanbanColumns.length ? kanbanColumns : [{name:'Новый'},{name:'Переговоры'},{name:'В работе'}]).map(c => '<option>' + c.name + '</option>').join('')}</select></div>
+                            <div class="form-group"><label class="form-label" for="newProjectDeadline">Дедлайн</label><input type="date" class="form-input" id="newProjectDeadline" value="${esc(d.deadline)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newProjectPayDate">Дата оплаты</label><input type="date" class="form-input" id="newProjectPayDate" value="${esc(d.payDate)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newProjectStatus">Статус</label><select class="form-select" id="newProjectStatus" onclick="event.stopPropagation()">${statusOpts}</select></div>
                             <div class="form-group"><label class="form-label" for="newProjectAssignee">Исполнитель</label><select class="form-select" id="newProjectAssignee" onclick="event.stopPropagation()">${assigneeOpts}</select></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newProjectSource">Источник</label><select class="form-select" id="newProjectSource" onclick="event.stopPropagation()"><option>Сайт</option><option>Авито</option><option>Telegram</option><option>Реклама</option><option>Знакомые</option></select></div>
-                            <div class="form-group"><label class="form-label" for="newProjectAdequacy">Адекватность</label><select class="form-select" id="newProjectAdequacy" onclick="event.stopPropagation()"><option value="good">Нормальный</option><option value="warn">Осторожно</option><option value="bad">Не работаем</option></select></div>
+                            <div class="form-group"><label class="form-label" for="newProjectSource">Источник</label><select class="form-select" id="newProjectSource" onclick="event.stopPropagation()">${['Сайт','Авито','Telegram','Реклама','Знакомые'].map(s => `<option${(d.source||'Сайт')===s?' selected':''}>${s}</option>`).join('')}</select></div>
+                            <div class="form-group"><label class="form-label" for="newProjectAdequacy">Адекватность</label><select class="form-select" id="newProjectAdequacy" onclick="event.stopPropagation()"><option value="good"${(d.adequacy||'good')==='good'?' selected':''}>Нормальный</option><option value="warn"${d.adequacy==='warn'?' selected':''}>Осторожно</option><option value="bad"${d.adequacy==='bad'?' selected':''}>Не работаем</option></select></div>
                         </div>
-                        <div class="form-group"><label class="form-label" for="newProjectHashtags">Хештеги (через запятую)</label><input type="text" class="form-input" id="newProjectHashtags" placeholder="#wordpress, #сайт, #лендинг" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('newProjectDescription', '', 'Описание проекта…')}</div>
+                        <div class="form-group"><label class="form-label" for="newProjectHashtags">Хештеги (через запятую)</label><input type="text" class="form-input" id="newProjectHashtags" value="${esc(d.hashtags)}" placeholder="#wordpress, #сайт, #лендинг" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label">Описание</label>${renderRichEditor('newProjectDescription', d.description || '', 'Описание проекта…')}</div>
                     </div>
-                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createProject()">Создать</button></div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal(true)">Отмена</button><button class="btn btn-primary" onclick="createProject()">Создать</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
-            bindRichEditor('newProjectDescription');
+            bindRichEditor('newProjectDescription', { onChange: () => DraftStore.save('new_project', collectNewProjectDraft()) });
+            DraftStore.bind('new_project', collectNewProjectDraft, () => {});
         };
         
         window.formatAmountField = function(input) {
@@ -456,6 +493,7 @@
                     hashtags: hashtags
                 });
                 
+                DraftStore.clear('new_project');
                 closeModal();
                 showToast('Проект создан', 'success');
                 await CRM.load();
@@ -512,7 +550,7 @@
 
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Настройка колонок</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Настройка колонок</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div style="font-size:0.8rem;color:var(--gray-500);margin-bottom:12px;">Перетащите для порядка · Двойной клик по названию для переименования</div>
                         <div id="colConfigList">${renderColList()}</div>

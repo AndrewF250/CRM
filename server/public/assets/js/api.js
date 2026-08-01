@@ -156,6 +156,114 @@ const API = {
     async addDocument(data) { return this.request('/documents', { method: 'POST', body: JSON.stringify(data) }); },
     async deleteDocument(id) { return this.request(`/documents/${id}`, { method: 'DELETE' }); },
 
+    async getWikiKinds() { return this.request('/wiki-kinds'); },
+    async createWikiKind(data) { return this.request('/wiki-kinds', { method: 'POST', body: JSON.stringify(data) }); },
+    async deleteWikiKind(id) {
+        LoadingBar.show();
+        try {
+            const res = await fetch(`${this.baseUrl}/wiki-kinds/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(this.token ? { Authorization: 'Bearer ' + this.token } : {})
+                }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const err = new Error(data.error || 'Ошибка удаления типа');
+                err.status = res.status;
+                err.data = data;
+                throw err;
+            }
+            return data;
+        } finally {
+            LoadingBar.hide();
+        }
+    },
+    async uploadFile(formData) {
+        LoadingBar.show();
+        try {
+            if (!this.token) {
+                throw new Error('Нет авторизации — войдите в аккаунт заново');
+            }
+            let res;
+            try {
+                res = await fetch('/api/uploads', {
+                    method: 'POST',
+                    headers: { Authorization: 'Bearer ' + this.token },
+                    body: formData
+                });
+            } catch (netErr) {
+                throw new Error('Сеть: не удалось связаться с сервером (' + (netErr.message || 'offline') + ')');
+            }
+            if (!res.ok) {
+                let err = {};
+                let raw = '';
+                try { raw = await res.text(); err = JSON.parse(raw); } catch (e) {}
+                const detail = err.error || raw.slice(0, 120) || res.statusText || 'без текста';
+                let msg;
+                if (res.status === 401) msg = 'Нет доступа (401) — сессия истекла, войдите снова';
+                else if (res.status === 404) msg = 'API /api/uploads не найден (404) — перезапустите сервер';
+                else if (res.status === 413) msg = 'Файл слишком большой для сервера (413)';
+                else if (res.status === 400) msg = detail;
+                else msg = 'Ошибка загрузки HTTP ' + res.status + ': ' + detail;
+                const error = new Error(msg);
+                error.status = res.status;
+                error.data = err;
+                throw error;
+            }
+            return res.json();
+        } finally {
+            LoadingBar.hide();
+        }
+    },
+
+    async getWikiPages(params = {}) {
+        const q = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== '') q.set(k, v);
+        });
+        const qs = q.toString();
+        return this.request(`/wiki-pages${qs ? '?' + qs : ''}`);
+    },
+    async getWikiPage(id) { return this.request(`/wiki-pages/${id}`); },
+    async createWikiPage(data) { return this.request('/wiki-pages', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateWikiPage(id, data) { return this.request(`/wiki-pages/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
+    async reorderWikiPages(items) {
+        return this.request('/wiki-pages/reorder', {
+            method: 'POST',
+            body: JSON.stringify({ items })
+        });
+    },
+    async deleteWikiPage(id) { return this.request(`/wiki-pages/${id}`, { method: 'DELETE' }); },
+    async uploadWikiPage(formData) {
+        LoadingBar.show();
+        try {
+            if (!this.token) throw new Error('Нет авторизации — войдите заново');
+            let res;
+            try {
+                res = await fetch('/api/wiki-pages/upload', {
+                    method: 'POST',
+                    headers: { Authorization: 'Bearer ' + this.token },
+                    body: formData
+                });
+            } catch (netErr) {
+                throw new Error('Сеть: ' + (netErr.message || 'нет связи с сервером'));
+            }
+            if (!res.ok) {
+                let err = {};
+                let raw = '';
+                try { raw = await res.text(); err = JSON.parse(raw); } catch (e) {}
+                const detail = err.error || raw.slice(0, 120) || res.statusText;
+                if (res.status === 404) throw new Error('API wiki-upload не найден (404) — перезапустите сервер');
+                throw new Error((detail || 'Ошибка загрузки') + ' [' + res.status + ']');
+            }
+            return res.json();
+        } finally {
+            LoadingBar.hide();
+        }
+    },
+
     // Calls
     async getCalls(projectId = null) {
         const query = projectId ? `?project_id=${projectId}` : '';
@@ -210,9 +318,24 @@ function openModal(id) {
     document.body.style.overflow = 'hidden';
 }
 
-function closeModal() {
+/**
+ * Close modal.
+ * closeModal(true) or closeModal({ discardDraft: true }) — clear draft (крестик / отмена)
+ * closeModal() — keep draft (клик по фону)
+ */
+function closeModal(opts) {
     const overlay = document.getElementById('modalOverlay');
     if (!overlay) return;
+    const discard = opts === true || (opts && typeof opts === 'object' && opts.discardDraft === true);
+    const draftEl = overlay.querySelector('[data-draft-key]');
+    const draftKey = draftEl ? draftEl.getAttribute('data-draft-key') : '';
+    if (overlay._draftTimer) {
+        clearInterval(overlay._draftTimer);
+        overlay._draftTimer = null;
+    }
     overlay.classList.remove('show');
     document.body.style.overflow = '';
+    if (discard && draftKey && typeof DraftStore !== 'undefined') {
+        DraftStore.clear(draftKey);
+    }
 }

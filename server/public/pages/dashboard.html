@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дашборд — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=20">
+    <link rel="stylesheet" href="/assets/css/style.css?v=45">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=16"></script>
-    <script src="/assets/js/app.js?v=21"></script>
-    <script src="/assets/js/crm-data.js?v=16"></script>
+    <script src="/assets/js/api.js?v=23"></script>
+    <script src="/assets/js/app.js?v=38"></script>
+    <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     function formatDate(dateStr) {
         if (!dateStr) return '—';
@@ -40,41 +40,61 @@
         
         const user = API.getCurrentUser();
         const app = document.getElementById('app');
+        let wikiPages = [];
+        let selectedDocId = Number(localStorage.getItem('dashDocId') || 0) || null;
         
         app.innerHTML = renderSidebar('dashboard') + renderHeader() + `
             <div class="page-header">
                 <div><h1 class="page-title">Добрый день, ${user ? user.name : 'Админ'}</h1><p class="page-subtitle" id="currentDate"></p></div>
             </div>
             <div class="stats-grid" id="statsGrid"></div>
-            <div class="grid-2">
-                <div class="card">
+            <div class="dash-layout">
+                <aside class="dash-docs card">
                     <div class="card-header">
-                        <div style="display:flex;align-items:center;gap:6px;">
-                            <h3 class="card-title">Мои задачи</h3>
-                            <button class="btn btn-ghost btn-sm" onclick="showNewTaskModal()" title="Создать задачу" aria-label="Создать задачу" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</button>
+                        <h3 class="card-title">Документы</h3>
+                        <a href="/pages/documents.html" class="btn btn-ghost btn-sm">Все</a>
+                    </div>
+                    <div class="dash-docs-body">
+                        <select class="form-select" id="dashDocSelect" aria-label="Выбор документа">
+                            <option value="">Выберите документ…</option>
+                        </select>
+                        <div class="dash-doc-view" id="dashDocView">
+                            <p class="text-muted" style="text-align:center;padding:24px 12px;">Выберите документ слева</p>
                         </div>
-                        <a href="/pages/tasks.html" class="btn btn-ghost btn-sm">Все</a>
                     </div>
-                    <div class="card-body" style="padding:12px;" id="todayTasks"></div>
-                </div>
-                <div class="card">
-                    <div class="card-header"><h3 class="card-title">Проекты</h3><a href="/pages/projects.html" class="btn btn-ghost btn-sm">Все</a></div>
-                    <div class="card-body" style="padding:0;" id="recentProjects"></div>
-                </div>
-            </div>
-            <div class="card" style="margin-top:16px;">
-                <div class="card-header">
-                    <div style="display:flex;align-items:center;gap:6px;">
-                        <h3 class="card-title">Цели</h3>
-                        <a href="/pages/goals.html" class="btn btn-ghost btn-sm" title="Создать цель" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</a>
+                </aside>
+                <div class="dash-main">
+                    <div class="grid-2">
+                        <div class="card">
+                            <div class="card-header">
+                                <div style="display:flex;align-items:center;gap:6px;">
+                                    <h3 class="card-title">Мои задачи</h3>
+                                    <button class="btn btn-ghost btn-sm" onclick="showNewTaskModal()" title="Создать задачу" aria-label="Создать задачу" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</button>
+                                </div>
+                                <a href="/pages/tasks.html" class="btn btn-ghost btn-sm">Все</a>
+                            </div>
+                            <div class="card-body" style="padding:12px;" id="todayTasks"></div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title">Проекты</h3><a href="/pages/projects.html" class="btn btn-ghost btn-sm">Все</a></div>
+                            <div class="card-body" style="padding:0;" id="recentProjects"></div>
+                        </div>
                     </div>
-                    <a href="/pages/goals.html" class="btn btn-ghost btn-sm">Все</a>
+                    <div class="card" style="margin-top:16px;">
+                        <div class="card-header">
+                            <div style="display:flex;align-items:center;gap:6px;">
+                                <h3 class="card-title">Цели</h3>
+                                <a href="/pages/goals.html" class="btn btn-ghost btn-sm" title="Создать цель" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</a>
+                            </div>
+                            <a href="/pages/goals.html" class="btn btn-ghost btn-sm">Все</a>
+                        </div>
+                        <div class="card-body" style="padding:12px;" id="dashboardGoals"></div>
+                    </div>
+                    <div class="card" style="margin-top:16px;" id="remindersCard">
+                        <div class="card-header"><h3 class="card-title">Напоминания об оплате</h3></div>
+                        <div class="card-body" style="padding:12px;" id="remindersList"></div>
+                    </div>
                 </div>
-                <div class="card-body" style="padding:12px;" id="dashboardGoals"></div>
-            </div>
-            <div class="card" style="margin-top:16px;" id="remindersCard">
-                <div class="card-header"><h3 class="card-title">Напоминания об оплате</h3></div>
-                <div class="card-body" style="padding:12px;" id="remindersList"></div>
             </div>
             </div></div></div>
         `;
@@ -83,9 +103,84 @@
         
         const now = new Date();
         document.getElementById('currentDate').textContent = 'Сегодня, ' + now.toLocaleDateString('ru-RU');
+
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function renderDocSelect() {
+            const sel = document.getElementById('dashDocSelect');
+            if (!sel) return;
+            const opts = ['<option value="">Выберите документ…</option>'].concat(
+                wikiPages.map(p => {
+                    const prefix = p.parent_id != null ? '↳ ' : '';
+                    return `<option value="${p.id}"${Number(selectedDocId) === Number(p.id) ? ' selected' : ''}>${prefix}${esc(p.title)}</option>`;
+                })
+            );
+            sel.innerHTML = opts.join('');
+        }
+
+        function renderSelectedDoc() {
+            const view = document.getElementById('dashDocView');
+            if (!view) return;
+            const page = wikiPages.find(p => Number(p.id) === Number(selectedDocId));
+            if (!page) {
+                view.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px 12px;">Выберите документ</p>';
+                return;
+            }
+            const body = (typeof renderRichHtml === 'function')
+                ? renderRichHtml(page.content || '')
+                : esc(page.content || '');
+            const meta = [];
+            if (page.kind) meta.push(esc(page.kind));
+            if (page.updated_at) meta.push(esc(String(page.updated_at).replace('T', ' ').slice(0, 16)));
+            view.innerHTML = `
+                <div class="dash-doc-head">
+                    <h2 class="dash-doc-title">${esc(page.title)}</h2>
+                    ${meta.length ? `<div class="dash-doc-meta">${meta.join(' · ')}</div>` : ''}
+                    <a class="btn btn-secondary btn-sm" href="/pages/documents.html?id=${page.id}">Открыть в документах</a>
+                </div>
+                <div class="dash-doc-content rich-content">${body || '<p class="text-muted">Пустой документ</p>'}</div>
+            `;
+        }
+
+        async function loadWikiDocs() {
+            try {
+                if (typeof API.getWikiPages === 'function') {
+                    wikiPages = await API.getWikiPages() || [];
+                } else {
+                    wikiPages = await API.get('/wiki-pages') || [];
+                }
+                wikiPages.sort((a, b) =>
+                    (Number(a.sort_order) - Number(b.sort_order)) ||
+                    String(a.title || '').localeCompare(String(b.title || ''), 'ru')
+                );
+            } catch (e) {
+                wikiPages = [];
+            }
+            if (selectedDocId && !wikiPages.some(p => Number(p.id) === Number(selectedDocId))) {
+                selectedDocId = wikiPages[0] ? wikiPages[0].id : null;
+            }
+            if (!selectedDocId && wikiPages.length) {
+                selectedDocId = wikiPages[0].id;
+            }
+            if (selectedDocId) localStorage.setItem('dashDocId', String(selectedDocId));
+            renderDocSelect();
+            renderSelectedDoc();
+        }
+
+        document.getElementById('dashDocSelect')?.addEventListener('change', (e) => {
+            selectedDocId = e.target.value ? Number(e.target.value) : null;
+            if (selectedDocId) localStorage.setItem('dashDocId', String(selectedDocId));
+            else localStorage.removeItem('dashDocId');
+            renderSelectedDoc();
+        });
         
         async function loadDashboardData() {
         await CRM.load();
+        await loadWikiDocs();
         const stats = await API.getStats();
         
         // Render stats
@@ -96,7 +191,7 @@
             <div class="stat-card"><div class="stat-icon purple"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="stat-info"><div class="stat-label">Клиенты</div><div class="stat-value">${stats.totalClients || 0}</div></div></div>
         `;
         
-        // Render tasks of the current user only — detailed cards like on the tasks page
+        // Render tasks — description via renderDescClamp (rich HTML safe)
         const tasks = CRM.getTasks().filter(t => !t.done && user && t.person === user.name).slice(0, 5);
         if (tasks.length === 0) {
             document.getElementById('todayTasks').innerHTML = '<p class="text-muted" style="text-align:center;padding:20px;">Нет активных задач</p>';
@@ -109,16 +204,21 @@
                 const dateRange = t.date && t.date_end && t.date !== t.date_end
                     ? formatDate(t.date) + ' — ' + formatDate(t.date_end)
                     : formatDate(t.date) !== '—' ? formatDate(t.date) : '';
-                return `<div class="task-card${isPaused ? ' paused' : ''}" style="cursor:pointer;" onclick="location.href='/pages/task.html?id=${t.id}'">
+                const desc = t.description
+                    ? (typeof renderDescClamp === 'function'
+                        ? renderDescClamp(t.description, { lines: 3, id: 'ddash_' + t.id })
+                        : '')
+                    : '';
+                return `<div class="task-card${isPaused ? ' paused' : ''}" style="cursor:pointer;" onclick="if(!event.target.closest('.desc-clamp-wrap,.desc-clamp-btn,a'))location.href='/pages/task.html?id=${t.id}'">
                     <div style="flex:1;min-width:0;">
-                        <div class="task-name" style="font-weight:600;font-size:0.95rem;">${t.name}</div>
-                        ${t.description ? '<div style="font-size:0.82rem;color:var(--gray-500);margin-top:3px;line-height:1.4;white-space:pre-wrap;">' + t.description + '</div>' : ''}
+                        <div class="task-name" style="font-weight:600;font-size:0.95rem;">${esc(t.name)}</div>
+                        ${desc}
                         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:0.8rem;color:var(--gray-500);flex-wrap:wrap;">
-                            ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" onclick="event.stopPropagation()" style="color:var(--primary);text-decoration:none;">' + project.name + '</a><span>·</span>' : ''}
-                            <span>${t.person}</span>
-                            ${dateRange ? '<span>·</span><span>' + dateRange + (t.time ? ' ' + t.time : '') + '</span>' : (t.time ? '<span>·</span><span>' + t.time + '</span>' : '')}
+                            ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" onclick="event.stopPropagation()" style="color:var(--primary);text-decoration:none;">' + esc(project.name) + '</a><span>·</span>' : ''}
+                            <span>${esc(t.person)}</span>
+                            ${dateRange ? '<span>·</span><span>' + dateRange + (t.time ? ' ' + esc(t.time) : '') + '</span>' : (t.time ? '<span>·</span><span>' + esc(t.time) + '</span>' : '')}
                             <span title="${priorityLabel[t.priority] || 'Средний'}">${priorityEmoji[t.priority] || '🟡'}</span>
-                            ${t.column_status ? '<span class="badge badge-gray" style="font-size:0.65rem;">' + t.column_status + '</span>' : ''}
+                            ${t.column_status ? '<span class="badge badge-gray" style="font-size:0.65rem;">' + esc(t.column_status) + '</span>' : ''}
                             ${isPaused ? '<span class="badge badge-warning" style="font-size:0.65rem;">ПРОСТОЙ</span>' : ''}
                         </div>
                     </div>
@@ -133,8 +233,8 @@
         } else {
             document.getElementById('recentProjects').innerHTML = '<div class="table-wrapper"><table class="table"><thead><tr><th>Проект</th><th>Статус</th><th>Сумма</th></tr></thead><tbody>' +
                 projects.map(p => `<tr>
-                    <td><a href="/pages/project.html?id=${p.id}" style="text-decoration:none;color:inherit;"><div class="table-cell-name">${p.client} — ${p.name}</div></a></td>
-                    <td><span class="badge ${getStatusClass(p.status)}">${p.status}</span></td>
+                    <td><a href="/pages/project.html?id=${p.id}" style="text-decoration:none;color:inherit;"><div class="table-cell-name">${esc(p.client)} — ${esc(p.name)}</div></a></td>
+                    <td><span class="badge ${getStatusClass(p.status)}">${esc(p.status)}</span></td>
                     <td class="table-cell-amount">${formatAmount(p.amount)}</td>
                 </tr>`).join('') +
                 '</tbody></table></div>';
@@ -161,12 +261,12 @@
                             cdCls = days < 3 ? 'urgent' : 'ok';
                         }
                     }
-                    const assignees = (g.assignees || []).slice(0, 3).map(a => '<span class="goal-assignee-chip">' + a + '</span>').join('');
+                    const assignees = (g.assignees || []).slice(0, 3).map(a => '<span class="goal-assignee-chip">' + esc(a) + '</span>').join('');
                     const progress = Math.min(100, Math.max(0, g.progress || 0));
                     return `<div class="goal-card" style="margin-bottom:8px;padding:12px;cursor:pointer;" onclick="location.href='/pages/goals.html?goal=${g.id}'">
                         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
                             <div style="flex:1;min-width:0;">
-                                <div style="font-weight:600;font-size:0.95rem;">${g.name}</div>
+                                <div style="font-weight:600;font-size:0.95rem;">${esc(g.name)}</div>
                                 <div class="goal-assignees" style="margin-top:6px;">${assignees}</div>
                                 <div class="goal-progress-bar"><span style="width:${progress}%"></span></div>
                             </div>
@@ -189,8 +289,8 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                         </div>
                         <div style="flex:1;">
-                            <div style="font-weight:600;">${r.project_name}</div>
-                            <div style="font-size:0.85rem;color:var(--gray-500);">${r.project_client} · ${formatAmount(r.project_amount)} ₽</div>
+                            <div style="font-weight:600;">${esc(r.project_name)}</div>
+                            <div style="font-size:0.85rem;color:var(--gray-500);">${esc(r.project_client)} · ${formatAmount(r.project_amount)} ₽</div>
                             <div style="font-size:0.8rem;color:var(--danger);margin-top:2px;">Оплата: ${formatDate(r.payment_due_date)}</div>
                         </div>
                         <button class="btn btn-sm btn-ghost" onclick="dismissReminder(${r.id})" title="Отметить как прочитанное" aria-label="Отметить как прочитанное">
@@ -211,32 +311,39 @@
         
         // New Task Modal
         window.showNewTaskModal = function() {
-
             const overlay = document.getElementById('modalOverlay');
+            const d = DraftStore.load('new_task_dash') || {};
             let projectOptions = '';
             CRM.getProjects().forEach(p => {
-                projectOptions += `<option value="${p.id}">${p.client} — ${p.name}</option>`;
+                projectOptions += `<option value="${p.id}"${d.projectId === p.id ? ' selected' : ''}>${esc(p.client)} — ${esc(p.name)}</option>`;
             });
             
             overlay.innerHTML = `
                 <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal()" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+                    <div class="modal-header"><h3 class="modal-title">Новая задача</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
-                        <div class="form-group"><label class="form-label" for="newTaskName">Название</label><input type="text" class="form-input" id="newTaskName" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                        <div class="form-group"><label class="form-label" for="newTaskName">Название</label><input type="text" class="form-input" id="newTaskName" value="${esc(d.name)}" placeholder="Что сделать?" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         <div class="form-row">
                             <div class="form-group"><label class="form-label" for="newTaskProject">Проект</label><select class="form-select" id="newTaskProject" onclick="event.stopPropagation()">${projectOptions}</select></div>
-                            <div class="form-group"><label class="form-label" for="newTaskPerson">Ответственный</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()">${['Костя', 'Максим', 'Андрей'].map(p => `<option${user && user.name === p ? ' selected' : ''}>${p}</option>`).join('')}</select></div>
+                            <div class="form-group"><label class="form-label" for="newTaskPerson">Исполнитель</label><select class="form-select" id="newTaskPerson" onclick="event.stopPropagation()">${['Костя', 'Максим', 'Андрей'].map(p => `<option${(d.person || (user && user.name)) === p ? ' selected' : ''}>${p}</option>`).join('')}</select></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата</label><input type="date" class="form-input" id="newTaskDate" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
-                            <div class="form-group"><label class="form-label" for="newTaskTime">Время</label><input type="time" class="form-input" id="newTaskTime" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskDate">Дата</label><input type="date" class="form-input" id="newTaskDate" value="${esc(d.date)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
+                            <div class="form-group"><label class="form-label" for="newTaskTime">Время</label><input type="time" class="form-input" id="newTaskTime" value="${esc(d.time)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></div>
                         </div>
                     </div>
-                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal(true)">Отмена</button><button class="btn btn-primary" onclick="createTask()">Создать</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
+            DraftStore.bind('new_task_dash', () => ({
+                name: document.getElementById('newTaskName')?.value || '',
+                projectId: document.getElementById('newTaskProject')?.value || '',
+                person: document.getElementById('newTaskPerson')?.value || '',
+                date: document.getElementById('newTaskDate')?.value || '',
+                time: document.getElementById('newTaskTime')?.value || ''
+            }), () => {});
         };
         
         window.createTask = async function() {
@@ -260,6 +367,7 @@
                     hashtags: []
                 });
                 
+                DraftStore.clear('new_task_dash');
                 closeModal();
                 showToast('Задача создана', 'success');
                 setTimeout(() => location.reload(), 500);

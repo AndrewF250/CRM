@@ -91,6 +91,8 @@ db.exec(`
     month TEXT NOT NULL,
     paid INTEGER DEFAULT 0,
     paid_date TEXT,
+    pay_date TEXT DEFAULT '',
+    payment_method TEXT DEFAULT 'transfer',
     note TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -113,6 +115,18 @@ try {
   db.prepare("SELECT payment_due_date FROM projects LIMIT 1").get();
 } catch (e) {
   db.exec("ALTER TABLE projects ADD COLUMN payment_due_date TEXT DEFAULT ''");
+}
+
+// Migration: salaries pay_date + payment_method
+try {
+  db.prepare('SELECT pay_date FROM salaries LIMIT 1').get();
+} catch (e) {
+  db.exec("ALTER TABLE salaries ADD COLUMN pay_date TEXT DEFAULT ''");
+}
+try {
+  db.prepare('SELECT payment_method FROM salaries LIMIT 1').get();
+} catch (e) {
+  db.exec("ALTER TABLE salaries ADD COLUMN payment_method TEXT DEFAULT 'transfer'");
 }
 
 // Create reminders table
@@ -278,6 +292,10 @@ try {
 } catch (e) {
   db.exec("ALTER TABLE tasks ADD COLUMN is_epic INTEGER DEFAULT 0");
 }
+// Epic only for top-level tasks — strip flag from nested ones
+try {
+  db.prepare("UPDATE tasks SET is_epic=0 WHERE parent_id IS NOT NULL AND parent_id != '' AND is_epic=1").run();
+} catch (e) {}
 
 // Migration: track who created / last updated a task
 try {
@@ -307,5 +325,107 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Calendar legend / status colors
+db.exec(`
+  CREATE TABLE IF NOT EXISTS calendar_statuses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT DEFAULT 'blue',
+    sort_order INTEGER DEFAULT 0
+  );
+`);
+const calStatusCount = db.prepare('SELECT COUNT(*) as c FROM calendar_statuses').get().c;
+if (calStatusCount === 0) {
+  const ins = db.prepare('INSERT INTO calendar_statuses (name, color, sort_order) VALUES (?, ?, ?)');
+  [
+    ['Просрочено', 'red', 0],
+    ['В работе', 'green', 1],
+    ['Ожидает', 'yellow', 2],
+    ['Цель', 'purple', 3],
+    ['Выполнено', 'gray', 4]
+  ].forEach(([n, c, o]) => ins.run(n, c, o));
+}
+
+// Wiki pages (Confluence-like documents tree)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wiki_pages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER DEFAULT NULL,
+    title TEXT NOT NULL,
+    content TEXT DEFAULT '',
+    kind TEXT DEFAULT 'page',
+    project_id TEXT DEFAULT NULL,
+    file_path TEXT DEFAULT '',
+    file_type TEXT DEFAULT '',
+    file_size TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_by TEXT DEFAULT '',
+    updated_by TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// Wiki page kinds / types (customizable)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wiki_kinds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    is_system INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+try {
+  const kindCount = db.prepare('SELECT COUNT(*) as c FROM wiki_kinds').get().c;
+  if (kindCount === 0) {
+    const insKind = db.prepare('INSERT INTO wiki_kinds (key, label, is_system, sort_order) VALUES (?, ?, ?, ?)');
+    [
+      ['page', 'Страница', 1, 0],
+      ['template', 'Шаблон', 1, 1],
+      ['prompt', 'Промпт', 1, 2],
+      ['file', 'Файл', 1, 3]
+    ].forEach(([k, l, sys, o]) => insKind.run(k, l, sys, o));
+  }
+} catch (e) {}
+
+// One-time migrate legacy documents → wiki_pages (only if wiki empty)
+try {
+  const wikiCount = db.prepare('SELECT COUNT(*) as c FROM wiki_pages').get().c;
+  if (wikiCount === 0) {
+    const legacy = db.prepare('SELECT * FROM documents ORDER BY created_at ASC').all();
+    if (legacy.length) {
+      const ins = db.prepare(`INSERT INTO wiki_pages
+        (parent_id, title, content, kind, project_id, file_path, file_type, file_size, sort_order, created_at, updated_at)
+        VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`);
+      let order = 0;
+      for (const d of legacy) {
+        let kind = 'file';
+        if (d.doc_category === 'template') {
+          const tc = (d.template_category || '').toLowerCase();
+          if (tc.includes('промпт') || tc.includes('prompt')) kind = 'prompt';
+          else if (tc.includes('шаблон') || tc.includes('template')) kind = 'template';
+          else kind = 'template';
+        }
+        ins.run(
+          null,
+          d.name || 'Без названия',
+          kind,
+          d.project_id || null,
+          d.file_path || '',
+          d.type || '',
+          d.size || '',
+          order++,
+          d.created_at || new Date().toISOString(),
+          d.created_at || new Date().toISOString()
+        );
+      }
+    }
+  }
+} catch (e) {
+  // ignore migration errors
+}
 
 module.exports = db;
