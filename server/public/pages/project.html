@@ -253,6 +253,8 @@
                     </div>
                 </div>
                 <div class="page-actions">
+                    <button class="btn btn-secondary" onclick="previewAsClient()" title="Открыть клиентский вид">Как видит клиент</button>
+                    <button class="btn btn-primary" onclick="document.querySelector('[data-tab=tabAccess]')?.click(); setTimeout(()=>document.getElementById('btnClientLink')?.focus(),100)" title="Ссылка для клиента">Клиенту</button>
                     <button class="btn btn-secondary" onclick="editProject()" title="Полная форма"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Всё</button>
                     <button class="btn btn-danger" onclick="deleteProject()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg> Удалить</button>
                 </div>
@@ -307,7 +309,7 @@
                 <button class="tab-btn active" data-tab="tabTasks">Задачи</button>
                 <button class="tab-btn" data-tab="tabDocs">Документы</button>
                 <button class="tab-btn" data-tab="tabCalls">Звонки</button>
-                <button class="tab-btn" data-tab="tabAccess">Доступы</button>
+                <button class="tab-btn" data-tab="tabAccess">Клиенту</button>
             </div>
             
             <div class="tab-content active" id="tabTasks">
@@ -335,15 +337,48 @@
                 <div class="card" style="border:2px solid var(--primary);">
                     <div class="card-header" style="background:var(--primary-light);">
                         <div style="display:flex;align-items:center;gap:8px;">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                            <span class="card-title" style="color:var(--primary);">Доступы к проекту</span>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                            <span class="card-title" style="color:var(--primary);">Ссылка для клиента</span>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="cred-block"><span class="cred-label">Статус</span><span class="cred-value">${project.status}</span></div>
-                        <div class="cred-block"><span class="cred-label">Клиент</span><span class="cred-value">${project.client}</span></div>
-                        <div class="cred-block"><span class="cred-label">Сумма</span><span class="cred-value">${formatAmount(project.amount)}</span></div>
-                        <div class="cred-block"><span class="cred-label">Дедлайн</span><span class="cred-value">${project.deadline || '—'}</span></div>
+                        <p class="text-sm text-muted" style="margin:0 0 12px;">Клиент видит прогресс %, этапы задач и ленту «что сделано». Без сумм и внутренних заметок.</p>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                            <button class="btn btn-primary" id="btnClientLink" onclick="enableClientLink()">Включить / получить ссылку</button>
+                            <button class="btn btn-secondary" id="btnCopyClientLink" onclick="copyClientLink()" style="display:none;">Копировать</button>
+                            <button class="btn btn-ghost" id="btnOpenClientLink" onclick="openClientLink()" style="display:none;">Открыть</button>
+                            <button class="btn btn-secondary" id="btnPreviewClientLink" onclick="previewAsClient()" style="display:none;">Как видит клиент</button>
+                            <button class="btn btn-ghost" id="btnRegenClientLink" onclick="regenClientLink()" style="display:none;">Новая ссылка</button>
+                            <label style="display:flex;align-items:center;gap:6px;margin-left:auto;font-size:0.9rem;">
+                                <input type="checkbox" id="chkClientPortal" onchange="toggleClientPortal(this.checked)"> Включено
+                            </label>
+                        </div>
+                        <input class="form-input" id="clientLinkUrl" readonly placeholder="Ссылка появится здесь" style="margin-bottom:16px;">
+
+                        <div id="clientStatsBox" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:14px 16px;margin-bottom:14px;border:2px solid var(--primary);border-radius:12px;background:var(--primary-light);">
+                            <div style="min-width:200px;flex:1;">
+                                <div class="fw-600" style="color:var(--primary);font-size:1rem;">Собирать статистику с этой ссылки</div>
+                                <div class="text-sm text-muted" style="margin-top:2px;">Сохраняется сразу. Выключено — заходы не считаются.</div>
+                            </div>
+                            <label style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
+                                <span class="text-sm fw-600" id="clientStatsLabel">Выкл</span>
+                                <span style="position:relative;width:52px;height:30px;display:inline-block;">
+                                    <input type="checkbox" id="chkClientStats" onchange="toggleClientStats(this.checked)" style="position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;z-index:2;">
+                                    <span id="clientStatsSwitch" style="position:absolute;inset:0;border-radius:999px;background:var(--gray-300);transition:background .2s;"></span>
+                                    <span id="clientStatsKnob" style="position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .2s;"></span>
+                                </span>
+                            </label>
+                        </div>
+
+                        <div class="text-sm text-muted" id="clientSiteUrlInfo" style="margin-bottom:12px;">Сайт клиента: —</div>
+                        <div class="text-sm fw-600" style="margin-bottom:6px;">Заходы по ссылке</div>
+                        <div class="text-sm text-muted" id="clientLinkStats" style="margin-bottom:6px;">—</div>
+                        <div id="clientLinkChart" style="display:flex;align-items:flex-end;gap:2px;height:72px;margin-bottom:14px;padding:8px;border:1px solid var(--gray-200);border-radius:10px;background:var(--gray-50);"></div>
+
+                        <div id="clientChartsMore" style="border:1px solid var(--gray-200);border-radius:10px;padding:14px;background:var(--white);">
+                            <div class="fw-600" style="margin-bottom:8px;">Диаграммы клиента</div>
+                            <div id="mgrClientCharts" class="text-sm text-muted">Загрузка…</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -361,6 +396,7 @@
                     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                     const el = document.getElementById(target);
                     if (el) el.classList.add('active');
+                    if (target === 'tabAccess' && window.loadClientLink) window.loadClientLink();
                 });
             });
         });
@@ -969,6 +1005,160 @@
             if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
             return Math.round(bytes / (1024 * 1024)) + ' MB';
         }
+
+        let _clientLink = { url: '', previewUrl: '', enabled: false, stats_enabled: true, visits: [] };
+
+        function paintStatsSwitch(on) {
+            const sw = document.getElementById('clientStatsSwitch');
+            const knob = document.getElementById('clientStatsKnob');
+            const label = document.getElementById('clientStatsLabel');
+            if (sw) sw.style.background = on ? 'var(--primary)' : 'var(--gray-300)';
+            if (knob) knob.style.left = on ? '25px' : '3px';
+            if (label) label.textContent = on ? 'Вкл' : 'Выкл';
+        }
+
+        function renderClientLinkUI(data) {
+            _clientLink = Object.assign(_clientLink, data || {});
+            const urlEl = document.getElementById('clientLinkUrl');
+            const chk = document.getElementById('chkClientPortal');
+            const chkStats = document.getElementById('chkClientStats');
+            const stats = document.getElementById('clientLinkStats');
+            const chart = document.getElementById('clientLinkChart');
+            const more = document.getElementById('mgrClientCharts');
+            const has = !!(_clientLink.url);
+            const statsOn = _clientLink.stats_enabled !== false;
+            if (urlEl) urlEl.value = _clientLink.url || '';
+            if (chk) chk.checked = !!_clientLink.enabled;
+            if (chkStats) chkStats.checked = statsOn;
+            paintStatsSwitch(statsOn);
+            ['btnCopyClientLink', 'btnOpenClientLink', 'btnPreviewClientLink', 'btnRegenClientLink'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = has ? '' : 'none';
+            });
+            const siteInfo = document.getElementById('clientSiteUrlInfo');
+            if (siteInfo) {
+                siteInfo.innerHTML = _clientLink.site_url
+                    ? ('Сайт клиента: <a href="' + String(_clientLink.site_url).replace(/"/g, '') + '" target="_blank" rel="noopener" style="color:var(--primary);">' + String(_clientLink.site_url).replace(/[<>&]/g, '') + '</a>')
+                    : 'Сайт клиента: ещё не указал в кабинете';
+            }
+            if (stats) {
+                stats.textContent = !statsOn
+                    ? 'Сбор выключен'
+                    : ('Всего за 30 дней: ' + (_clientLink.visitsTotal ?? 0));
+            }
+            if (chart) {
+                if (!statsOn) {
+                    chart.innerHTML = '<div class="text-sm text-muted" style="padding:18px 0;width:100%;text-align:center;">Включите сбор статистики выше</div>';
+                } else {
+                    const visits = _clientLink.visits || [];
+                    const max = Math.max(1, ...visits.map(v => v.count || 0));
+                    chart.innerHTML = visits.map(v => {
+                        const h = v.count ? Math.max(8, Math.round((v.count / max) * 100)) : 4;
+                        return `<div title="${v.day}: ${v.count}" style="flex:1;height:${h}%;background:${v.count ? 'var(--primary)' : 'var(--gray-200)'};border-radius:2px 2px 0 0;"></div>`;
+                    }).join('');
+                }
+            }
+            if (more) {
+                more.innerHTML = 'На странице клиента: кольцо готовности, статусы этапов, заходы по дням.'
+                    + (has ? ' <a href="#" onclick="previewAsClient();return false;" style="color:var(--primary);">Открыть предпросмотр</a>' : '');
+            }
+        }
+
+        window.loadClientLink = async function() {
+            try {
+                const data = await API.get('/api/projects/' + projectId + '/client-link');
+                renderClientLinkUI(data);
+            } catch (e) {
+                /* ignore until enabled */
+            }
+        };
+
+        window.enableClientLink = async function() {
+            try {
+                const data = await API.post('/api/projects/' + projectId + '/client-link', {});
+                renderClientLinkUI(data);
+                showToast('Ссылка готова', 'success');
+            } catch (e) {
+                showToast(e.message || 'Ошибка', 'error');
+            }
+        };
+
+        window.regenClientLink = async function() {
+            if (!confirm('Старая ссылка перестанет работать. Продолжить?')) return;
+            try {
+                const data = await API.post('/api/projects/' + projectId + '/client-link', { regenerate: true });
+                renderClientLinkUI(data);
+                showToast('Новая ссылка', 'success');
+            } catch (e) {
+                showToast(e.message || 'Ошибка', 'error');
+            }
+        };
+
+        window.toggleClientPortal = async function(enabled) {
+            try {
+                const data = await API.put('/api/projects/' + projectId + '/client-link', { enabled: !!enabled });
+                renderClientLinkUI(data);
+                showToast(enabled ? 'Портал включён' : 'Портал выключен', 'success');
+            } catch (e) {
+                showToast(e.message || 'Ошибка', 'error');
+                const chk = document.getElementById('chkClientPortal');
+                if (chk) chk.checked = !!_clientLink.enabled;
+            }
+        };
+
+        window.toggleClientStats = async function(enabled) {
+            try {
+                const data = await API.put('/api/projects/' + projectId + '/client-link', { stats_enabled: !!enabled });
+                renderClientLinkUI(data);
+                showToast(enabled ? 'Сбор статистики включён' : 'Сбор статистики выключен', 'success');
+            } catch (e) {
+                showToast(e.message || 'Ошибка', 'error');
+                const chk = document.getElementById('chkClientStats');
+                if (chk) chk.checked = _clientLink.stats_enabled !== false;
+            }
+        };
+
+        window.copyClientLink = async function() {
+            const url = _clientLink.url || document.getElementById('clientLinkUrl')?.value;
+            if (!url) return showToast('Сначала получите ссылку', 'error');
+            try {
+                await navigator.clipboard.writeText(url);
+                showToast('Ссылка скопирована', 'success');
+            } catch (e) {
+                document.getElementById('clientLinkUrl')?.select();
+                showToast('Скопируйте вручную', 'error');
+            }
+        };
+
+        window.openClientLink = function() {
+            if (_clientLink.url) window.open(_clientLink.url, '_blank');
+        };
+
+        window.previewAsClient = async function() {
+            try {
+                if (!_clientLink.url && !_clientLink.previewUrl) {
+                    const data = await API.get('/api/projects/' + projectId + '/client-link');
+                    renderClientLinkUI(data);
+                }
+                let url = _clientLink.previewUrl || (_clientLink.url ? (_clientLink.url + (_clientLink.url.includes('?') ? '&' : '?') + 'preview=1') : '');
+                if (!url) {
+                    const data = await API.post('/api/projects/' + projectId + '/client-link', {});
+                    renderClientLinkUI(data);
+                    url = data.previewUrl || (data.url + '&preview=1');
+                }
+                if (!_clientLink.enabled) {
+                    await API.put('/api/projects/' + projectId + '/client-link', { enabled: true });
+                    _clientLink.enabled = true;
+                    const chk = document.getElementById('chkClientPortal');
+                    if (chk) chk.checked = true;
+                }
+                window.open(url, '_blank');
+            } catch (e) {
+                showToast(e.message || 'Нет ссылки клиента', 'error');
+            }
+        };
+
+        loadClientLink();
     })();
     </script>
 </body>

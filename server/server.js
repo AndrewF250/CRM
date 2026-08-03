@@ -804,6 +804,229 @@ app.put('/api/projects/:id', requireAuth, (req, res) => {
   }
 });
 
+// ==================== CLIENT PORTAL (share link) ====================
+
+function clientLinkPayload(project, req) {
+  const token = project.client_token || '';
+  const visits = token ? visitSeries(project.id, 30) : [];
+  return {
+    enabled: !!project.client_portal_enabled,
+    stats_enabled: project.client_stats_enabled === undefined || project.client_stats_enabled === null
+      ? true
+      : !!project.client_stats_enabled,
+    site_url: project.client_site_url || '',
+    token,
+    url: token ? clientPortalUrl(token, req) : '',
+    previewUrl: token ? clientPortalUrl(token, req) + '&preview=1' : '',
+    visits,
+    visitsTotal: visits.reduce((s, v) => s + v.count, 0)
+  };
+}
+
+app.get('/api/projects/:id/client-link', requireAuth, (req, res) => {
+  try {
+    const project = db.prepare(`
+      SELECT id, name, client_token, client_portal_enabled, client_stats_enabled, client_site_url
+      FROM projects WHERE id = ?
+    `).get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    res.json(clientLinkPayload(project, req));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/client-link', requireAuth, (req, res) => {
+  try {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const regen = !!(req.body && req.body.regenerate);
+    let token = project.client_token;
+    if (!token || regen) token = crypto.randomBytes(24).toString('hex');
+    db.prepare(`
+      UPDATE projects SET client_token=?, client_portal_enabled=1, updated_at=CURRENT_TIMESTAMP WHERE id=?
+    `).run(token, project.id);
+    logActivity(project.id, null, req.user.name, 'client_link', regen ? 'Обновлена ссылка клиента' : 'Включён портал клиента');
+    const updated = db.prepare(`
+      SELECT id, name, client_token, client_portal_enabled, client_stats_enabled, client_site_url
+      FROM projects WHERE id = ?
+    `).get(project.id);
+    res.json(clientLinkPayload(updated, req));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/projects/:id/client-link', requireAuth, (req, res) => {
+  try {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const body = req.body || {};
+    let token = project.client_token;
+    const sets = [];
+    const vals = [];
+
+    if (Object.prototype.hasOwnProperty.call(body, 'enabled')) {
+      const enabled = !!body.enabled;
+      if (enabled && !token) token = ensureClientToken(project.id);
+      sets.push('client_portal_enabled=?');
+      vals.push(enabled ? 1 : 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'stats_enabled')) {
+      sets.push('client_stats_enabled=?');
+      vals.push(body.stats_enabled ? 1 : 0);
+    }
+    if (sets.length) {
+      sets.push('updated_at=CURRENT_TIMESTAMP');
+      vals.push(project.id);
+      db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id=?`).run(...vals);
+    }
+    const updated = db.prepare(`
+      SELECT id, name, client_token, client_portal_enabled, client_stats_enabled, client_site_url
+      FROM projects WHERE id = ?
+    `).get(project.id);
+    res.json(clientLinkPayload(updated, req));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Public client portal — no auth */
+app.get('/api/public/client/:token', (req, res) => {
+  try {
+    const token = String(req.params.token || '').trim();
+    if (!token || token.length < 16) return res.status(404).json({ error: 'Ссылка недействительна' });
+    const project = db.prepare(`
+      SELECT id, name, client, status, deadline, progress, description,
+             client_portal_enabled, client_stats_enabled, client_site_url
+      FROM projects WHERE client_token = ? LIMIT 1
+    `).get(token);
+    if (!project || !project.client_portal_enabled) {
+      return res.status(404).json({ error: 'Ссылка отключена или не найдена' });
+    }
+    const statsEnabled = project.client_stats_enabled === undefined || project.client_stats_enabled === null
+      ? true
+      : !!project.client_stats_enabled;
+
+    const tasks = db.prepare(`
+      SELECT id, name, column_status, done, date, date_end, parent_id, is_epic, updated_at, created_at
+      FROM tasks
+      WHERE project_id = ? AND COALESCE(client_visible, 1) = 1
+      ORDER BY done ASC, created_at ASC
+    `).all(project.id);
+
+    const total = tasks.length;
+    const doneCount = tasks.filter(t => t.done).length;
+    const progress = total > 0 ? Math.round((doneCount / total) * 100) : (project.progress || 0);
+
+    const activity = db.prepare(`
+      SELECT action, details, created_at FROM activity
+      WHERE project_id = ? AND action IN ('complete_task','change_status','create_task','client_link')
+      ORDER BY created_at DESC LIMIT 40
+    `).all(project.id).map(a => ({
+      action: a.action,
+      details: a.details || '',
+      created_at: a.created_at
+    }));
+
+    let documents = [];
+    try {
+      documents = db.prepare(`
+        SELECT id, name, type, size, created_at FROM documents
+        WHERE project_id = ? AND COALESCE(doc_category, 'client') = 'client'
+        ORDER BY created_at DESC LIMIT 50
+      `).all(project.id);
+    } catch (e) {
+      documents = [];
+    }
+
+    const visits = statsEnabled ? visitSeries(project.id, 30) : [];
+    const visitsTotal = visits.reduce((s, v) => s + v.count, 0);
+
+    res.json({
+      project: {
+        name: project.name,
+        client: project.client,
+        status: project.status,
+        deadline: project.deadline || '',
+        progress,
+        description: project.description || ''
+      },
+      tasks: tasks.map(t => ({
+        id: t.id,
+        name: t.name,
+        status: t.column_status || (t.done ? 'Готово' : 'Ожидает'),
+        done: !!t.done,
+        date: t.date || '',
+        date_end: t.date_end || '',
+        parent_id: t.parent_id || null,
+        is_epic: !!t.is_epic
+      })),
+      stats: { total, done: doneCount, progress },
+      activity,
+      documents,
+      stats_enabled: statsEnabled,
+      site_url: project.client_site_url || '',
+      visits,
+      visitsTotal
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function normalizeClientSiteUrl(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.length > 500) throw new Error('Слишком длинный адрес');
+  if (/^(javascript|data|vbscript):/i.test(s)) throw new Error('Недопустимый адрес');
+  if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+  let u;
+  try {
+    u = new URL(s);
+  } catch (e) {
+    throw new Error('Введите корректный адрес сайта');
+  }
+  if (!['http:', 'https:'].includes(u.protocol)) throw new Error('Только http/https');
+  if (!u.hostname || !u.hostname.includes('.')) throw new Error('Введите адрес вида site.ru');
+  return u.origin + (u.pathname === '/' ? '' : u.pathname.replace(/\/$/, '')) + (u.search || '');
+}
+
+app.put('/api/public/client/:token/site', (req, res) => {
+  try {
+    const token = String(req.params.token || '').trim();
+    const project = db.prepare(`
+      SELECT id FROM projects WHERE client_token = ? AND client_portal_enabled = 1 LIMIT 1
+    `).get(token);
+    if (!project) return res.status(404).json({ error: 'Ссылка отключена или не найдена' });
+    const siteUrl = normalizeClientSiteUrl(req.body && req.body.site_url);
+    db.prepare('UPDATE projects SET client_site_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+      .run(siteUrl, project.id);
+    res.json({ ok: true, site_url: siteUrl });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Ошибка' });
+  }
+});
+
+app.post('/api/public/client/:token/visit', (req, res) => {
+  try {
+    const token = String(req.params.token || '').trim();
+    const project = db.prepare(`
+      SELECT id, client_stats_enabled FROM projects
+      WHERE client_token = ? AND client_portal_enabled = 1 LIMIT 1
+    `).get(token);
+    if (!project) return res.status(404).json({ ok: false });
+    const statsEnabled = project.client_stats_enabled === undefined || project.client_stats_enabled === null
+      ? true
+      : !!project.client_stats_enabled;
+    if (!statsEnabled) return res.json({ ok: true, recorded: false });
+    recordClientVisit(project.id);
+    res.json({ ok: true, recorded: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.delete('/api/projects/:id', requireAuth, (req, res) => {
   try {
     const projectId = req.params.id;
@@ -814,6 +1037,7 @@ app.delete('/api/projects/:id', requireAuth, (req, res) => {
     db.prepare('DELETE FROM calls WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM activity WHERE project_id = ?').run(projectId);
     db.prepare('DELETE FROM reminders WHERE project_id = ?').run(projectId);
+    try { db.prepare('DELETE FROM client_link_visits WHERE project_id = ?').run(projectId); } catch (e) {}
     db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
     res.json({ success: true });
   } catch (err) {
@@ -860,13 +1084,14 @@ function mapTaskRow(task) {
     done: !!task.done,
     urgent: !!task.urgent,
     is_epic: !!task.is_epic,
+    client_visible: task.client_visible === undefined || task.client_visible === null ? true : !!task.client_visible,
     hashtags: JSON.parse(task.hashtags || '[]')
   };
 }
 
 app.post('/api/tasks', requireAuth, (req, res) => {
   try {
-    const { id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic } = req.body;
+    const { id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, client_visible } = req.body;
     const taskId = id || 'task_' + Date.now();
     
     // Validate parent_id
@@ -882,11 +1107,12 @@ app.post('/api/tasks', requireAuth, (req, res) => {
     const creator = (req.user && req.user.name) || '';
     // Nested tasks can never be Epic — only top-level parents
     const epicVal = parent_id ? 0 : (is_epic ? 1 : 0);
-    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, created_by, updated_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    const visibleVal = client_visible === false || client_visible === 0 ? 0 : 1;
+    db.prepare(`INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, created_by, updated_by, client_visible)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       taskId, project_id || '', name, column_status || 'Ожидает', person || 'Костя',
       date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0, JSON.stringify(hashtags || []), parent_id || null, priority || 'medium', description || '', epicVal,
-      creator, creator
+      creator, creator, visibleVal
     );
     
     // Auto-Epic only for top-level parent (not nested under another task)
@@ -910,7 +1136,7 @@ app.post('/api/tasks', requireAuth, (req, res) => {
 
 app.put('/api/tasks/:id', requireAuth, (req, res) => {
   try {
-    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, project_id } = req.body;
+    const { name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, project_id, client_visible } = req.body;
     
     const old = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Задача не найдена' });
@@ -936,12 +1162,15 @@ app.put('/api/tasks/:id', requireAuth, (req, res) => {
     let epicFlag = is_epic !== undefined ? (is_epic ? 1 : 0) : (old.is_epic ? 1 : 0);
     // Nested tasks can never be Epic — strip flag when linked under a parent
     if (newParentId) epicFlag = 0;
+    const visibleVal = client_visible !== undefined
+      ? ((client_visible === false || client_visible === 0) ? 0 : 1)
+      : (old.client_visible === 0 ? 0 : 1);
     
     const updater = (req.user && req.user.name) || '';
-    db.prepare(`UPDATE tasks SET project_id=?, name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, description=?, is_epic=?, updated_by=?, updated_at=CURRENT_TIMESTAMP
+    db.prepare(`UPDATE tasks SET project_id=?, name=?, column_status=?, person=?, date=?, date_end=?, time=?, done=?, urgent=?, hashtags=?, parent_id=?, priority=?, description=?, is_epic=?, client_visible=?, updated_by=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?`).run(
       newProjectId, name, column_status, person, date || '', date_end || '', time || '', done ? 1 : 0, urgent ? 1 : 0,
-      JSON.stringify(hashtags || []), newParentId, priority || 'medium', description || '', epicFlag, updater, req.params.id
+      JSON.stringify(hashtags || []), newParentId, priority || 'medium', description || '', epicFlag, visibleVal, updater, req.params.id
     );
 
     // Auto-Epic only for top-level parent (not nested)
@@ -1003,6 +1232,49 @@ function updateProjectProgress(projectId) {
   const stats = db.prepare('SELECT COUNT(*) as total, SUM(CASE WHEN done = 1 THEN 1 ELSE 0 END) as done FROM tasks WHERE project_id = ?').get(projectId);
   const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
   db.prepare('UPDATE projects SET progress = ? WHERE id = ?').run(progress, projectId);
+}
+
+function ensureClientToken(projectId) {
+  const p = db.prepare('SELECT id, client_token FROM projects WHERE id = ?').get(projectId);
+  if (!p) return null;
+  if (p.client_token) return p.client_token;
+  const token = crypto.randomBytes(24).toString('hex');
+  db.prepare('UPDATE projects SET client_token=?, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(token, projectId);
+  return token;
+}
+
+function clientPortalUrl(token, req) {
+  const host = (req && req.get && req.get('x-forwarded-host')) || (req && req.get && req.get('host')) || 'crm-seo-123.xyz';
+  const proto = (req && req.get && req.get('x-forwarded-proto')) || (String(host).includes('localhost') ? 'http' : 'http');
+  return `${proto}://${host}/pages/client.html?t=${encodeURIComponent(token)}`;
+}
+
+function recordClientVisit(projectId) {
+  const day = new Date().toISOString().slice(0, 10);
+  db.prepare(`
+    INSERT INTO client_link_visits (project_id, day, count) VALUES (?, ?, 1)
+    ON CONFLICT(project_id, day) DO UPDATE SET count = count + 1
+  `).run(projectId, day);
+}
+
+function visitSeries(projectId, days = 30) {
+  const rows = db.prepare(`
+    SELECT day, count FROM client_link_visits
+    WHERE project_id = ? AND day >= date('now', ?)
+    ORDER BY day ASC
+  `).all(projectId, `-${Math.max(1, days) - 1} days`);
+  const map = new Map(rows.map(r => [r.day, r.count]));
+  const out = [];
+  const start = new Date();
+  start.setHours(12, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const key = d.toISOString().slice(0, 10);
+    out.push({ day: key, count: map.get(key) || 0 });
+  }
+  return out;
 }
 
 // ==================== KANBAN COLUMNS API ====================

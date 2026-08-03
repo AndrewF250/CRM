@@ -725,4 +725,40 @@ try {
   console.error('app_settings seed:', e.message);
 }
 
+// Client portal: share token + visit stats + client-visible tasks
+try {
+  db.prepare('SELECT client_token FROM projects LIMIT 1').get();
+} catch (e) {
+  db.exec("ALTER TABLE projects ADD COLUMN client_token TEXT DEFAULT ''");
+}
+try {
+  db.prepare('SELECT client_portal_enabled FROM projects LIMIT 1').get();
+} catch (e) {
+  db.exec('ALTER TABLE projects ADD COLUMN client_portal_enabled INTEGER DEFAULT 0');
+}
+try {
+  db.prepare('SELECT client_stats_enabled FROM projects LIMIT 1').get();
+} catch (e) {
+  db.exec('ALTER TABLE projects ADD COLUMN client_stats_enabled INTEGER DEFAULT 1');
+}
+try {
+  db.prepare('SELECT client_site_url FROM projects LIMIT 1').get();
+} catch (e) {
+  db.exec("ALTER TABLE projects ADD COLUMN client_site_url TEXT DEFAULT ''");
+}
+try {
+  db.prepare('SELECT client_visible FROM tasks LIMIT 1').get();
+} catch (e) {
+  db.exec('ALTER TABLE tasks ADD COLUMN client_visible INTEGER DEFAULT 1');
+}
+db.exec(`
+  CREATE TABLE IF NOT EXISTS client_link_visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    count INTEGER DEFAULT 0,
+    UNIQUE(project_id, day)
+  );
+`);
+
 module.exports = db;

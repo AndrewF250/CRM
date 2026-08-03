@@ -100,6 +100,7 @@
                         <button class="btn btn-secondary btn-sm" id="viewList" onclick="switchTaskView('list')" style="background:var(--primary-light);color:var(--primary);border-color:var(--primary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg> Список</button>
                         <button class="btn btn-secondary btn-sm" id="viewKanban" onclick="switchTaskView('kanban')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> Канбан</button>
                     </div>
+                    <button class="btn btn-secondary" id="btnPreviewAsClient" onclick="previewAsClientFromTasks()" title="Открыть клиентский вид проекта">Как видит клиент</button>
                     <button class="btn btn-primary" onclick="showNewTaskModal()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Новая задача</button>
                 </div>
             </div>
@@ -1661,6 +1662,30 @@
                 renderTaskFilters();
                 showTaskColumnConfigModal();
             } catch (err) { showToast(err.message || 'Ошибка', 'error'); }
+        };
+
+        window.previewAsClientFromTasks = async function() {
+            if (!currentProjectFilter || currentProjectFilter === 'all') {
+                showToast('Сначала выберите проект в фильтре', 'error');
+                return;
+            }
+            try {
+                let data = await API.get('/api/projects/' + currentProjectFilter + '/client-link');
+                if (!data.url) {
+                    data = await API.post('/api/projects/' + currentProjectFilter + '/client-link', {});
+                }
+                if (!data.enabled) {
+                    data = await API.put('/api/projects/' + currentProjectFilter + '/client-link', { enabled: true });
+                    if (!data.url && data.token) {
+                        data = await API.get('/api/projects/' + currentProjectFilter + '/client-link');
+                    }
+                }
+                const url = data.previewUrl || (data.url ? (data.url + (data.url.includes('?') ? '&' : '?') + 'preview=1') : '');
+                if (!url) return showToast('Не удалось получить ссылку', 'error');
+                window.open(url, '_blank');
+            } catch (e) {
+                showToast(e.message || 'Ошибка', 'error');
+            }
         };
     })();
     </script>
