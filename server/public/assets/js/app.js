@@ -3,6 +3,85 @@
  * Full CRUD functionality with API backend
  */
 
+// ==================== TIMEZONE (default: Perm) ====================
+window.CrmTime = (function () {
+    const DEFAULT_TZ = 'Asia/Yekaterinburg';
+    let tz = localStorage.getItem('crm_timezone') || DEFAULT_TZ;
+
+    function normalize(t) {
+        return (t && String(t).trim()) || DEFAULT_TZ;
+    }
+    function setTimezone(t) {
+        tz = normalize(t);
+        try { localStorage.setItem('crm_timezone', tz); } catch (e) {}
+        window.CRM_TZ = tz;
+        return tz;
+    }
+    function getTimezone() { return tz; }
+
+    function parts(date) {
+        const d = date instanceof Date ? date : new Date(date);
+        const fmt = new Intl.DateTimeFormat('en-CA', {
+            timeZone: tz,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            hour12: false
+        });
+        const map = {};
+        for (const p of fmt.formatToParts(d)) {
+            if (p.type !== 'literal') map[p.type] = p.value;
+        }
+        let hour = map.hour || '00';
+        if (hour === '24') hour = '00';
+        return {
+            year: map.year, month: map.month, day: map.day,
+            hour, minute: map.minute || '00', second: map.second || '00'
+        };
+    }
+    function todayISO() {
+        const p = parts(new Date());
+        return p.year + '-' + p.month + '-' + p.day;
+    }
+    function nowTime() {
+        const p = parts(new Date());
+        return p.hour + ':' + p.minute + ':' + p.second;
+    }
+    function addDaysISO(dateStr, days) {
+        if (!dateStr) return '';
+        const m = String(dateStr).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return '';
+        const dt = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + (Number(days) || 0)));
+        return dt.toISOString().slice(0, 10);
+    }
+    function formatDateTime(value) {
+        if (value == null || value === '') return '';
+        let raw = String(value).trim();
+        if (!raw.includes('T') && /^\d{4}-\d{2}-\d{2} /.test(raw)) {
+            raw = raw.replace(' ', 'T') + 'Z';
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            return raw.slice(8, 10) + '.' + raw.slice(5, 7) + '.' + raw.slice(0, 4);
+        }
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return String(value);
+        const p = parts(d);
+        return p.day + '.' + p.month + '.' + p.year + ' ' + p.hour + ':' + p.minute;
+    }
+    function formatDate(value) {
+        if (!value) return '';
+        const s = String(value).slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+            return s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4);
+        }
+        return formatDateTime(value).slice(0, 10);
+    }
+
+    setTimezone(tz);
+    return {
+        DEFAULT_TZ, getTimezone, setTimezone, todayISO, nowTime,
+        addDaysISO, formatDateTime, formatDate, parts
+    };
+})();
+
 // ==================== DARK MODE ====================
 function initTheme() {
     const saved = localStorage.getItem('crm_theme');
@@ -590,18 +669,23 @@ function initCommonUI() {
     updateBadges();
     initGlobalSearch();
     initDataTipTooltips();
-    // Version label (re-rendered with header)
+    // Version + timezone (re-rendered with header)
     (async () => {
         const el = document.getElementById('appVersionRow');
-        if (!el) return;
         try {
             const info = await API.get('/api/app-info');
+            if (info && info.timezone && window.CrmTime) {
+                CrmTime.setTimezone(info.timezone);
+            }
             const v = (info && info.version) || '—';
             window.CRM_APP_VERSION = v;
-            el.textContent = 'v' + v;
-            el.title = 'CRM WebAgency ' + v;
+            if (el) {
+                el.textContent = 'v' + v;
+                const tzLabel = (info && info.timezoneLabel) || (info && info.timezone) || '';
+                el.title = 'CRM WebAgency ' + v + (tzLabel ? ' · ' + tzLabel : '');
+            }
         } catch (e) {
-            el.textContent = 'v—';
+            if (el) el.textContent = 'v—';
         }
     })();
 
@@ -807,10 +891,10 @@ function plainNotifText(html) {
 function renderNotifItem(n) {
     let time = '';
     if (n.created_at) {
-        const dt = new Date(String(n.created_at).includes('T') ? n.created_at : String(n.created_at).replace(' ', 'T') + 'Z');
-        if (!isNaN(dt.getTime())) {
-            time = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' '
-                + dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        const full = window.CrmTime ? CrmTime.formatDateTime(n.created_at) : '';
+        if (full) {
+            // DD.MM.YYYY HH:MM → DD.MM HH:MM
+            time = full.replace(/^(\d{2}\.\d{2})\.\d{4}\s/, '$1 ');
         }
     }
     const tid = String(n.task_id || '').replace(/'/g, '');
@@ -2552,16 +2636,7 @@ window.formatNoteReminderMeta = function(r) {
     const me = (API.getCurrentUser && API.getCurrentUser())?.name || '';
     let when = '';
     if (r && r.created_at) {
-        try {
-            const d = new Date(r.created_at.includes('T') ? r.created_at : String(r.created_at).replace(' ', 'T'));
-            if (!isNaN(d.getTime())) {
-                when = d.toLocaleString('ru-RU', {
-                    day: '2-digit', month: '2-digit', year: '2-digit',
-                    hour: '2-digit', minute: '2-digit'
-                });
-            }
-        } catch (e) {}
-        if (!when) when = String(r.created_at).slice(0, 16);
+        when = window.CrmTime ? CrmTime.formatDateTime(r.created_at) : String(r.created_at).slice(0, 16);
     }
     const by = (r && r.created_by) ? String(r.created_by).trim() : '';
     if (by && me && by !== me) return (when ? when + ' · ' : '') + by;

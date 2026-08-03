@@ -417,7 +417,28 @@ try {
   });
   ensure('domain', 'Домен CRM', {
     url: 'http://crm-seo-123.xyz/',
-    label: 'Публичный адрес CRM'
+    label: 'Публичный адрес CRM',
+    renew_date: '',
+    registrar: '',
+    note: ''
+  });
+  ensure('subscription', 'Хостинг / домен (биллинг)', {
+    domain: 'http://crm-seo-123.xyz/',
+    label: 'Оплата хостинга / VPS',
+    provider: 'AdminVPS',
+    plan: '',
+    amount: '',
+    currency: 'RUB',
+    renew_date: '',
+    paid_until: '',
+    note: ''
+  });
+  ensure('adminvps', 'AdminVPS (хостинг / DNS)', {
+    baseUrl: 'https://my.adminvps.ru',
+    zone_id: '64808',
+    domain: 'http://crm-seo-123.xyz/',
+    label: 'Кабинет AdminVPS · DNSManager',
+    panel_url: 'https://my.adminvps.ru/index.php?m=DNSManager2&mg-action=editZone&zone_id=64808'
   });
   ensure('ai_openai', 'OpenAI / ChatGPT', {
     provider: 'openai',
@@ -449,10 +470,10 @@ try {
   try {
     db.prepare("UPDATE integrations SET name = 'CRM App (этот сервер)', status = 'ok' WHERE type = 'server'").run();
     db.prepare("UPDATE integrations SET name = 'База данных SQLite', status = 'ok' WHERE type = 'database'").run();
-    db.prepare("UPDATE integrations SET name = 'Хостинг / домен (биллинг)', meta = ? WHERE type = 'subscription'")
-      .run(JSON.stringify({ note: 'Биллинг позже', domain: 'http://crm-seo-123.xyz/' }));
+    db.prepare("UPDATE integrations SET name = 'Хостинг / домен (биллинг)' WHERE type = 'subscription'").run();
     db.prepare("UPDATE integrations SET name = 'OpenAI / ChatGPT' WHERE type = 'ai_openai'").run();
     db.prepare("UPDATE integrations SET name = 'Anthropic Claude' WHERE type = 'ai_claude'").run();
+    // не затираем meta subscription/domain — только имя
   } catch (e) {}
 } catch (e) {}
 
@@ -683,6 +704,25 @@ try {
   }
 } catch (e) {
   console.error('documents→wiki migration:', e.message);
+}
+
+// Global app settings (timezone etc.)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+try {
+  const tzRow = db.prepare("SELECT value FROM app_settings WHERE key = 'timezone'").get();
+  if (!tzRow) {
+    db.prepare(
+      "INSERT INTO app_settings (key, value) VALUES ('timezone', 'Asia/Yekaterinburg')"
+    ).run();
+  }
+} catch (e) {
+  console.error('app_settings seed:', e.message);
 }
 
 module.exports = db;

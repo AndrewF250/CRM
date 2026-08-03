@@ -6,3 +6,6 @@ uploads/
 .env
 server/.vault-key
 .vault-key
+server/data/
+server/_debug_*
+server/_seed_*

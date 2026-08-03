@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Финансы — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=59">
+    <link rel="stylesheet" href="/assets/css/style.css?v=60">
     <style>
         .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 2px solid var(--gray-200); padding-bottom: 0; }
         .tab { padding: 10px 20px; cursor: pointer; font-weight: 500; color: var(--gray-500); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; }
@@ -59,7 +59,7 @@
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=24"></script>
-    <script src="/assets/js/app.js?v=54"></script>
+    <script src="/assets/js/app.js?v=55"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -81,8 +81,11 @@
         let categoryRows = [];
         const AI_SUBGROUPS = ['Костя', 'Максим', 'Андрей', 'Общий'];
 
-        function isoToday() { return new Date().toISOString().slice(0, 10); }
+        function isoToday() {
+            return (window.CrmTime && CrmTime.todayISO()) || new Date().toISOString().slice(0, 10);
+        }
         function addDaysISO(iso, days) {
+            if (window.CrmTime) return CrmTime.addDaysISO(iso, days);
             const d = new Date(iso + 'T12:00:00');
             d.setDate(d.getDate() + days);
             return d.toISOString().slice(0, 10);

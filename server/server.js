@@ -9,9 +9,81 @@ const { hashPassword, verifyPassword, isHashed } = require('./auth-passwords');
 const vault = require('./vault');
 const deployOps = require('./deploy-ops');
 const appVersion = require('./app-version');
+const tzUtil = require('./timezone');
+const adminvpsOps = require('./adminvps-ops');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
+
+function getAppTimezone() {
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'timezone'").get();
+    return tzUtil.normalizeTz(row && row.value);
+  } catch (e) {
+    return tzUtil.DEFAULT_TZ;
+  }
+}
+
+function setAppTimezone(tz) {
+  const next = tzUtil.normalizeTz(tz);
+  db.prepare(`
+    INSERT INTO app_settings (key, value, updated_at) VALUES ('timezone', ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  `).run(next);
+  return next;
+}
+
+/** Shift calendar dates when timezone day boundary changes */
+function migrateDatesForTimezone(oldTz, newTz) {
+  const delta = tzUtil.dayDelta(oldTz, newTz);
+  if (!delta) return { delta: 0, updated: 0 };
+  let updated = 0;
+  const shiftCol = (table, col) => {
+    try {
+      const rows = db.prepare(`SELECT rowid AS rid, ${col} AS v FROM ${table} WHERE ${col} IS NOT NULL AND ${col} != ''`).all();
+      const upd = db.prepare(`UPDATE ${table} SET ${col} = ? WHERE rowid = ?`);
+      for (const r of rows) {
+        const next = tzUtil.shiftISODate(r.v, delta);
+        if (next && next !== r.v) {
+          upd.run(next, r.rid);
+          updated++;
+        }
+      }
+    } catch (e) {
+      console.error('migrateDates', table, col, e.message);
+    }
+  };
+  [
+    ['tasks', 'date'],
+    ['tasks', 'date_end'],
+    ['projects', 'deadline'],
+    ['projects', 'payment_due_date'],
+    ['expenses', 'date'],
+    ['expenses', 'next_date'],
+    ['salaries', 'pay_date'],
+    ['salaries', 'paid_date'],
+    ['goals', 'date_start'],
+    ['goals', 'date_end'],
+    ['reminders', 'remind_date']
+  ].forEach(([t, c]) => shiftCol(t, c));
+  // salaries.month YYYY-MM from pay_date-ish: shift month string if looks like YYYY-MM
+  try {
+    const rows = db.prepare("SELECT id, month FROM salaries WHERE month IS NOT NULL AND month != ''").all();
+    const upd = db.prepare('UPDATE salaries SET month = ? WHERE id = ?');
+    for (const r of rows) {
+      if (!/^\d{4}-\d{2}$/.test(r.month)) continue;
+      const shifted = tzUtil.addDaysISO(r.month + '-15', delta);
+      if (shifted) {
+        const nm = shifted.slice(0, 7);
+        if (nm !== r.month) {
+          upd.run(nm, r.id);
+          updated++;
+        }
+      }
+    }
+  } catch (e) {}
+  return { delta, updated };
+}
 
 // Ensure uploads directory exists (multer fails with ENOENT otherwise)
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -125,19 +197,15 @@ function notifyAllUsers(actor, action, message, projectId = null, kind = null) {
 }
 
 function addDaysISO(dateStr, days) {
-  if (!dateStr) return '';
-  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
-  if (Number.isNaN(d.getTime())) return '';
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return tzUtil.addDaysISO(dateStr, days);
 }
 
 function addMonthsISO(dateStr, months) {
   if (!dateStr) return '';
-  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
-  if (Number.isNaN(d.getTime())) return '';
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
+  const m = String(dateStr).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const dt = new Date(Date.UTC(+m[1], +m[2] - 1 + (Number(months) || 0), +m[3]));
+  return dt.toISOString().slice(0, 10);
 }
 
 /** Normalize recur_interval: day|week|month|year|every:N:unit */
@@ -185,7 +253,7 @@ function syncExpenseReminders() {
     for (const e of recurring) {
       let next = (e.next_date || e.date || '').slice(0, 10);
       if (!next) continue;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalISO();
       // If next_date already passed, roll forward
       let guard = 0;
       while (next < today && guard < 36) {
@@ -210,7 +278,7 @@ function syncExpenseReminders() {
 /** Push in-app notifications once when expense reminder becomes due. */
 function fireDueExpenseReminderNotifications() {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocalISO();
     const due = db.prepare(`
       SELECT * FROM reminders
       WHERE type = 'expense' AND is_sent = 0 AND notified = 0 AND remind_date <= ?
@@ -226,8 +294,7 @@ function fireDueExpenseReminderNotifications() {
 }
 
 function todayLocalISO() {
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return tzUtil.todayISO(getAppTimezone());
 }
 
 function parseDeadlineISO(raw) {
@@ -1691,7 +1758,7 @@ app.get('/api/salaries', requireAuth, (req, res) => {
 app.post('/api/salaries', requireAuth, (req, res) => {
   try {
     const { user_name, amount, note, pay_date, payment_method } = req.body;
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayLocalISO();
     const payDate = pay_date || today;
     const month = (req.body.month || String(payDate).slice(0, 7) || today.slice(0, 7));
     const method = payment_method === 'cash' ? 'cash' : 'transfer';
@@ -1710,7 +1777,7 @@ app.put('/api/salaries/:id', requireAuth, (req, res) => {
     const { user_name, amount, month, paid, note, pay_date, payment_method } = req.body;
     const old = db.prepare('SELECT * FROM salaries WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Не найдено' });
-    const paidDate = paid ? (old.paid_date || new Date().toISOString().split('T')[0]) : null;
+    const paidDate = paid ? (old.paid_date || todayLocalISO()) : null;
     const method = payment_method === undefined
       ? (old.payment_method || 'transfer')
       : (payment_method === 'cash' ? 'cash' : 'transfer');
@@ -1969,7 +2036,7 @@ app.get('/api/reminders', requireAuth, (req, res) => {
         ORDER BY r.created_at DESC
       `).all(day, day, todayLocal, me);
     } else if (active === 'true') {
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayLocalISO();
       reminders = db.prepare(`
         SELECT r.*,
           p.name as project_name, p.client as project_client, p.amount as project_amount, p.payment_due_date,
@@ -2284,10 +2351,17 @@ function integrationPublic(r) {
     safeSecret.auto_connect = !!(meta.auto_connect);
   } else if (String(r.type || '').startsWith('ai_')) {
     safeSecret.has_api_key = !!(secret.api_key || secret.token);
+  } else if (r.type === 'adminvps') {
+    safeSecret.has_password = !!(secret.password);
+    safeSecret.email = secret.email || meta.email || '';
+    safeSecret.baseUrl = secret.baseUrl || meta.baseUrl || adminvpsOps.DEFAULT_BASE;
   }
   const configured = hasSecret
     || !!(safeSecret.repoUrl)
     || !!(safeSecret.host && safeSecret.username)
+    || (r.type === 'adminvps' && !!(safeSecret.email && hasSecret))
+    || (r.type === 'domain' && !!(meta.url || meta.domain || meta.renew_date))
+    || (r.type === 'subscription' && !!(meta.renew_date || meta.paid_until || meta.plan || meta.amount))
     || (String(r.type || '').startsWith('ai_') && (meta.tariff || meta.renew_date || meta.tokens_used))
     || ['server', 'database'].includes(r.type);
   return {
@@ -2358,20 +2432,81 @@ app.get('/api/integrations', requireAuth, (req, res) => {
 app.get('/api/integrations/health', requireAuth, (req, res) => {
   try {
     const dbOk = !!db.prepare('SELECT 1 as ok').get();
-    const users = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
-    const projects = db.prepare('SELECT COUNT(*) as c FROM projects').get().c;
-    const tasksOpen = db.prepare('SELECT COUNT(*) as c FROM tasks WHERE IFNULL(done,0)=0').get().c;
-    const wiki = db.prepare('SELECT COUNT(*) as c FROM wiki_pages').get().c;
-    const ints = db.prepare('SELECT type, status FROM integrations').all();
-    const okIntegrations = ints.filter(i => i.status === 'ok').length;
+    const ints = db.prepare('SELECT id, type, name, status, meta FROM integrations').all();
+    const byType = (t) => ints.find(i => i.type === t);
+    const statusOf = (row) => (row && row.status) || 'idle';
+    const metaOf = (row) => parseMeta(row && row.meta);
+    const github = byType('github');
+    const ssh = ints.find(i => i.type === 'ssh_deploy' || i.type === 'server_ssh');
+    const adminvps = byType('adminvps');
+    const domain = byType('domain');
+    const hosting = byType('subscription');
+    const ais = ints.filter(i => String(i.type || '').startsWith('ai_'));
+    const aiOk = ais.filter(i => i.status === 'ok').length;
+    const coreTypes = new Set(['github', 'ssh_deploy', 'server_ssh', 'adminvps', 'domain', 'subscription', 'server', 'database']);
+    const tracked = ints.filter(i =>
+      coreTypes.has(i.type) || String(i.type || '').startsWith('ai_')
+    );
+    const okIntegrations = tracked.filter(i => i.status === 'ok').length;
     const uptimeSec = Math.floor(process.uptime());
     const info = appVersion.getInfo();
+    const domainMeta = metaOf(domain);
+    const hostMeta = metaOf(hosting);
+    const ghMeta = metaOf(github);
+    const sshMeta = metaOf(ssh);
+    const avMeta = metaOf(adminvps);
+    // Prefer vault secrets for display labels (host/repo often stored there)
+    let ghSecret = {};
+    let sshSecret = {};
+    try {
+      if (github) {
+        const full = db.prepare('SELECT * FROM integrations WHERE id = ?').get(github.id);
+        ghSecret = decryptSecretObj(full);
+      }
+      if (ssh) {
+        const full = db.prepare('SELECT * FROM integrations WHERE id = ?').get(ssh.id);
+        sshSecret = decryptSecretObj(full);
+      }
+    } catch (e) {}
+    const repoUrl = ghSecret.repoUrl || ghMeta.repoUrl || '';
+    let githubLabel = 'GitHub';
+    try {
+      const m = String(repoUrl).match(/github\.com[/:]([^/]+)\/([^/.]+)/i);
+      if (m) githubLabel = m[1] + '/' + m[2];
+      else if (repoUrl) githubLabel = String(repoUrl).replace(/^https?:\/\//, '').slice(0, 28);
+    } catch (e) {}
+    const sshHost = sshSecret.host || sshMeta.host || 'SSH';
     res.json({
       ok: dbOk,
       version: info.version,
+      timezone: getAppTimezone(),
       server: { uptimeSec, node: process.version, pid: process.pid },
-      db: { ok: dbOk, users, projects, tasksOpen, wiki },
-      integrations: { total: ints.length, ok: okIntegrations },
+      db: { ok: dbOk },
+      integrations: {
+        total: tracked.length,
+        ok: okIntegrations,
+        github: statusOf(github),
+        githubLabel,
+        githubRepo: repoUrl,
+        ssh: statusOf(ssh),
+        sshLabel: sshHost,
+        sshHost,
+        adminvps: statusOf(adminvps),
+        adminvpsLabel: avMeta.label || 'AdminVPS',
+        adminvpsZoneId: avMeta.zone_id || '',
+        domain: statusOf(domain),
+        hosting: statusOf(hosting),
+        ai: { total: ais.length, ok: aiOk },
+        domainUrl: domainMeta.url || domainMeta.domain || hostMeta.domain || avMeta.domain || 'http://crm-seo-123.xyz/',
+        hostingNote: hostMeta.note || '',
+        hostingProvider: hostMeta.provider || '',
+        hostingPlan: hostMeta.plan || '',
+        hostingAmount: hostMeta.amount || '',
+        hostingCurrency: hostMeta.currency || 'RUB',
+        hostingExpires: hostMeta.paid_until || hostMeta.expires_at || hostMeta.renew_date || '',
+        domainExpires: domainMeta.expires_at || domainMeta.renew_date || '',
+        domainRegistrar: domainMeta.registrar || ''
+      },
       checkedAt: new Date().toISOString()
     });
   } catch (err) {
@@ -2448,9 +2583,35 @@ app.put('/api/integrations/:id', requireAuth, async (req, res) => {
     db.prepare(`
       UPDATE integrations SET name=?, meta=?, secret_enc=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
     `).run(name, JSON.stringify(meta), enc, row.id);
+    // домен / биллинг: статус OK если есть дата продления или URL/план
+    if (row.type === 'domain') {
+      const ok = !!(meta.url || meta.domain) && !!(meta.renew_date || meta.expires_at);
+      markIntegration(row.id, ok ? 'ok' : (meta.url || meta.domain ? 'idle' : 'idle'), '');
+    } else if (row.type === 'subscription') {
+      const ok = !!(meta.renew_date || meta.paid_until || (meta.plan && meta.amount));
+      markIntegration(row.id, ok ? 'ok' : 'idle', '');
+    }
     res.json(integrationPublic(getIntegration(row.id)));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/integrations/:id/adminvps-captcha', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || row.type !== 'adminvps') {
+      return res.status(400).json({ ok: false, error: 'Только для AdminVPS' });
+    }
+    const s = decryptSecretObj(row);
+    const meta = parseMeta(row.meta);
+    const baseUrl = s.baseUrl || meta.baseUrl || adminvpsOps.DEFAULT_BASE;
+    const result = await adminvpsOps.fetchCaptcha({ baseUrl });
+    if (!result.ok) return res.status(502).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -2480,10 +2641,164 @@ app.post('/api/integrations/:id/test', requireAuth, async (req, res) => {
       markIntegration(row.id, result.ok ? 'ok' : 'error', result.ok ? '' : (result.err || 'SSH fail'));
       return res.json(result);
     }
+    if (row.type === 'adminvps') {
+      const s = decryptSecretObj(row);
+      const meta = parseMeta(row.meta);
+      const email = s.email || meta.email || '';
+      const password = s.password || '';
+      const baseUrl = s.baseUrl || meta.baseUrl || adminvpsOps.DEFAULT_BASE;
+      const zoneId = meta.zone_id || '';
+      const captchaCode = req.body && req.body.captchaCode != null ? String(req.body.captchaCode) : '';
+      const captchaSessionId = req.body && req.body.captchaSessionId != null ? String(req.body.captchaSessionId) : '';
+      if (!email || !password) {
+        markIntegration(row.id, 'error', 'Нужны email и пароль AdminVPS');
+        return res.status(400).json({ ok: false, error: 'Нужны email и пароль AdminVPS' });
+      }
+      const result = await adminvpsOps.checkDnsZone({
+        baseUrl, email, password, zoneId, captchaCode, captchaSessionId,
+        integrationId: row.id
+      });
+      const panel_url = `${String(baseUrl).replace(/\/$/, '')}/index.php?m=DNSManager2&mg-action=editZone&zone_id=${encodeURIComponent(zoneId || '')}`;
+      if (result.ok) {
+        markIntegration(row.id, 'ok', '');
+        db.prepare('UPDATE integrations SET meta=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+          .run(JSON.stringify({
+            ...meta,
+            last_ok_at: new Date().toISOString(),
+            panel_url,
+            captcha_block: false,
+            dns_records_count: Array.isArray(result.records) ? result.records.length : 0
+          }), row.id);
+      } else if (result.captcha) {
+        markIntegration(row.id, 'idle', result.err || 'Требуется капча');
+        db.prepare('UPDATE integrations SET meta=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+          .run(JSON.stringify({ ...meta, panel_url, captcha_block: true }), row.id);
+      } else {
+        markIntegration(row.id, 'error', result.err || 'AdminVPS fail');
+      }
+      return res.json({
+        ok: !!result.ok,
+        message: result.message || (result.ok ? 'OK' : result.err),
+        captcha: !!result.captcha,
+        needLogin: !!result.needLogin,
+        zoneId,
+        panel_url,
+        records: result.records || [],
+        source: result.source || '',
+        rawHint: result.rawHint || '',
+        analysis: result.analysis || null
+      });
+    }
     markIntegration(row.id, 'ok', '');
     res.json({ ok: true, message: 'OK' });
   } catch (err) {
     try { markIntegration(req.params.id, 'error', err.message); } catch (e) {}
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/integrations/:id/adminvps-zone', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || row.type !== 'adminvps') {
+      return res.status(400).json({ ok: false, error: 'Только для AdminVPS' });
+    }
+    const meta = parseMeta(row.meta);
+    const s = decryptSecretObj(row);
+    const baseUrl = s.baseUrl || meta.baseUrl || adminvpsOps.DEFAULT_BASE;
+    const zoneId = meta.zone_id || '';
+    const force = String(req.query.refresh || '') === '1';
+    const result = await adminvpsOps.getZoneWithSession(row.id, { baseUrl, zoneId, force });
+    // не 401 — иначе api.js разлогинит из CRM
+    if (result.needLogin) return res.status(409).json({ ok: false, needLogin: true, error: result.err || 'Нужен вход' });
+    if (!result.ok) return res.status(502).json({ ok: false, error: result.err || 'Ошибка зоны' });
+    res.json({
+      ok: true,
+      zoneId,
+      records: result.records || [],
+      cached: !!result.cached,
+      source: result.source || '',
+      rawHint: result.rawHint || ''
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/integrations/:id/adminvps-zone/records', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || row.type !== 'adminvps') {
+      return res.status(400).json({ ok: false, error: 'Только для AdminVPS' });
+    }
+    const meta = parseMeta(row.meta);
+    const body = req.body || {};
+    const result = await adminvpsOps.mutateRecord(row.id, {
+      action: 'add',
+      zoneId: meta.zone_id || '',
+      record: {
+        name: body.name,
+        type: body.type,
+        ttl: body.ttl,
+        data: body.data != null ? body.data : body.content
+      }
+    });
+    if (result.needLogin) return res.status(409).json({ ok: false, needLogin: true, error: result.err });
+    if (!result.ok) return res.status(502).json({ ok: false, error: result.err || 'Не удалось добавить', detail: result.detail });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.put('/api/integrations/:id/adminvps-zone/records/:line', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || row.type !== 'adminvps') {
+      return res.status(400).json({ ok: false, error: 'Только для AdminVPS' });
+    }
+    const meta = parseMeta(row.meta);
+    const body = req.body || {};
+    const result = await adminvpsOps.mutateRecord(row.id, {
+      action: 'edit',
+      zoneId: meta.zone_id || '',
+      record: {
+        line: req.params.line,
+        id: body.id != null ? body.id : req.params.line,
+        name: body.name,
+        type: body.type,
+        ttl: body.ttl,
+        data: body.data != null ? body.data : body.content
+      }
+    });
+    if (result.needLogin) return res.status(409).json({ ok: false, needLogin: true, error: result.err });
+    if (!result.ok) return res.status(502).json({ ok: false, error: result.err || 'Не удалось изменить', detail: result.detail });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete('/api/integrations/:id/adminvps-zone/records/:line', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || row.type !== 'adminvps') {
+      return res.status(400).json({ ok: false, error: 'Только для AdminVPS' });
+    }
+    const meta = parseMeta(row.meta);
+    const result = await adminvpsOps.mutateRecord(row.id, {
+      action: 'remove',
+      zoneId: meta.zone_id || '',
+      record: { line: req.params.line, id: req.params.line }
+    });
+    if (result.needLogin) return res.status(409).json({ ok: false, needLogin: true, error: result.err });
+    if (!result.ok) return res.status(502).json({ ok: false, error: result.err || 'Не удалось удалить', detail: result.detail });
+    res.json(result);
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -2580,7 +2895,61 @@ app.get('/api/app-info', requireAuth, (req, res) => {
       }
     }
   } catch (e) {}
-  res.json({ ...info, poll: changeVersion, changelogHead });
+  res.json({
+    ...info,
+    poll: changeVersion,
+    changelogHead,
+    timezone: getAppTimezone(),
+    timezoneLabel: tzUtil.TZ_LABELS[getAppTimezone()] || getAppTimezone(),
+    today: todayLocalISO(),
+    now: tzUtil.nowTimeISO(getAppTimezone()),
+    timezones: tzUtil.listTimezones()
+  });
+});
+
+// ==================== APP SETTINGS (timezone) ====================
+
+app.get('/api/app-settings', requireAuth, (req, res) => {
+  try {
+    const timezone = getAppTimezone();
+    res.json({
+      timezone,
+      timezoneLabel: tzUtil.TZ_LABELS[timezone] || timezone,
+      today: tzUtil.todayISO(timezone),
+      now: tzUtil.nowTimeISO(timezone),
+      timezones: tzUtil.listTimezones(),
+      serverUtcNow: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/app-settings', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Только администратор может менять часовой пояс' });
+    }
+    const oldTz = getAppTimezone();
+    const nextTz = tzUtil.normalizeTz(req.body.timezone);
+    const migrate = req.body.migrate !== false;
+    let migration = { delta: 0, updated: 0 };
+    if (nextTz !== oldTz) {
+      setAppTimezone(nextTz);
+      if (migrate) migration = migrateDatesForTimezone(oldTz, nextTz);
+    }
+    res.json({
+      timezone: nextTz,
+      timezoneLabel: tzUtil.TZ_LABELS[nextTz] || nextTz,
+      today: tzUtil.todayISO(nextTz),
+      now: tzUtil.nowTimeISO(nextTz),
+      previousTimezone: oldTz,
+      migration,
+      timezones: tzUtil.listTimezones()
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================== STATS API ====================
@@ -2612,6 +2981,22 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// One-time: if data was created against UTC calendar "today", shift to app TZ (Perm)
+try {
+  const done = db.prepare("SELECT value FROM app_settings WHERE key = 'tz_utc_shift_done'").get();
+  if (!done) {
+    const appTz = getAppTimezone();
+    const mig = migrateDatesForTimezone('UTC', appTz);
+    db.prepare(`
+      INSERT INTO app_settings (key, value, updated_at) VALUES ('tz_utc_shift_done', ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+    `).run(JSON.stringify({ from: 'UTC', to: appTz, ...mig }));
+    if (mig.delta) console.log('Timezone date shift UTC →', appTz, mig);
+  }
+} catch (e) {
+  console.error('tz_utc_shift_done:', e.message);
+}
+
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`CRM Server running on http://0.0.0.0:${PORT}`);
+  console.log(`CRM Server running on http://0.0.0.0:${PORT} · TZ ${getAppTimezone()}`);
 });

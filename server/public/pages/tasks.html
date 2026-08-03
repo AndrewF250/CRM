@@ -81,7 +81,7 @@
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=18"></script>
-    <script src="/assets/js/app.js?v=53"></script>
+    <script src="/assets/js/app.js?v=55"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -691,26 +691,24 @@
                 tasks = tasks.filter(t => t.project_id === currentProjectFilter);
             }
 
-            // Time filter
-            const today = new Date();
-            today.setHours(0,0,0,0);
-            const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-            const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+            // Time filter (app timezone, default Perm)
+            const todayIso = (window.CrmTime && CrmTime.todayISO()) || new Date().toISOString().slice(0, 10);
+            const tomorrowIso = (window.CrmTime && CrmTime.addDaysISO(todayIso, 1)) || todayIso;
+            const weekEndIso = (window.CrmTime && CrmTime.addDaysISO(todayIso, 7)) || todayIso;
 
             if (currentTimeFilter === 'today') {
-                tasks = tasks.filter(t => datePart(t.date) === today.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === todayIso);
             } else if (currentTimeFilter === 'tomorrow') {
-                tasks = tasks.filter(t => datePart(t.date) === tomorrow.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === tomorrowIso);
             } else if (currentTimeFilter === 'week') {
                 tasks = tasks.filter(t => {
-                    if (!t.date) return false;
-                    const d = new Date(datePart(t.date));
-                    return d >= today && d <= weekEnd;
+                    const d = datePart(t.date);
+                    return d && d >= todayIso && d <= weekEndIso;
                 });
             } else if (currentTimeFilter === 'overdue') {
                 tasks = tasks.filter(t => {
-                    if (!t.date || t.done) return false;
-                    return new Date(datePart(t.date)) < today;
+                    const d = datePart(t.date);
+                    return d && !t.done && d < todayIso;
                 });
             }
             
@@ -872,18 +870,18 @@
             if (currentProjectFilter !== 'all') {
                 tasks = tasks.filter(t => t.project_id === currentProjectFilter);
             }
-            // Apply time filter
-            const today = new Date(); today.setHours(0,0,0,0);
-            const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-            const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+            // Apply time filter (app timezone, default Perm)
+            const todayIso = (window.CrmTime && CrmTime.todayISO()) || new Date().toISOString().slice(0, 10);
+            const tomorrowIso = (window.CrmTime && CrmTime.addDaysISO(todayIso, 1)) || todayIso;
+            const weekEndIso = (window.CrmTime && CrmTime.addDaysISO(todayIso, 7)) || todayIso;
             if (currentTimeFilter === 'today') {
-                tasks = tasks.filter(t => datePart(t.date) === today.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === todayIso);
             } else if (currentTimeFilter === 'tomorrow') {
-                tasks = tasks.filter(t => datePart(t.date) === tomorrow.toISOString().split('T')[0]);
+                tasks = tasks.filter(t => datePart(t.date) === tomorrowIso);
             } else if (currentTimeFilter === 'week') {
-                tasks = tasks.filter(t => { if (!t.date) return false; const d = new Date(datePart(t.date)); return d >= today && d <= weekEnd; });
+                tasks = tasks.filter(t => { const d = datePart(t.date); return d && d >= todayIso && d <= weekEndIso; });
             } else if (currentTimeFilter === 'overdue') {
-                tasks = tasks.filter(t => { if (!t.date || t.done) return false; return new Date(datePart(t.date)) < today; });
+                tasks = tasks.filter(t => { const d = datePart(t.date); return d && !t.done && d < todayIso; });
             }
 
             const colorHexMap = { blue: '#3B82F6', yellow: '#F59E0B', green: '#10B981', gray: '#9CA3AF', red: '#EF4444', purple: '#8B5CF6', pink: '#EC4899', orange: '#F97316', teal: '#14B8A6', indigo: '#6366F1', lime: '#84CC16', cyan: '#06B6D4' };

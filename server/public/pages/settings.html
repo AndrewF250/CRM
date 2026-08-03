@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Настройки — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=59">
+    <link rel="stylesheet" href="/assets/css/style.css?v=60">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=24"></script>
-    <script src="/assets/js/app.js?v=54"></script>
+    <script src="/assets/js/app.js?v=55"></script>
     <script src="/assets/js/dashboard-board.js?v=7"></script>
     <script>
     (async function() {
@@ -87,6 +87,22 @@
                                     Тёмная
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3 class="card-title tip" data-tip="Не время сервера — рабочий пояс CRM">Дата и время</h3></div>
+                        <div class="card-body">
+                            <p class="text-muted text-sm" style="margin:0 0 12px;">Сейчас в CRM: <strong id="tzNowLabel">—</strong></p>
+                            <div class="form-group">
+                                <label class="form-label" for="tzSelect">Часовой пояс</label>
+                                <select class="form-input" id="tzSelect" ${user?.role === 'admin' ? '' : 'disabled'}></select>
+                            </div>
+                            <p class="text-muted text-sm tip" data-tip="При смене пояса даты задач/проектов/расходов сдвигаются, если день уже другой" style="margin:0 0 12px;">
+                                По умолчанию — Пермь (UTC+5). При смене пояса даты переносятся.
+                            </p>
+                            ${user?.role === 'admin'
+                                ? '<button class="btn btn-primary" onclick="saveTimezone()">Сохранить пояс</button>'
+                                : '<p class="text-muted text-sm">Менять пояс может только администратор</p>'}
                         </div>
                     </div>
                     <div class="card">
@@ -224,13 +240,67 @@
             showToast(theme === 'dark' ? 'Тёмная тема' : 'Светлая тема', 'success');
         };
 
+        // Timezone (Perm by default)
+        let _tzClockTimer = null;
+        function paintTzNow(today, now, label) {
+            const el = document.getElementById('tzNowLabel');
+            if (!el) return;
+            const t = today || (window.CrmTime && CrmTime.todayISO()) || '';
+            const n = now || (window.CrmTime && CrmTime.nowTime()) || '';
+            const ru = t && /^\d{4}-\d{2}-\d{2}$/.test(t)
+                ? t.slice(8, 10) + '.' + t.slice(5, 7) + '.' + t.slice(0, 4)
+                : t;
+            el.textContent = (ru && n ? ru + ' ' + n.slice(0, 5) : '—') + (label ? ' · ' + label : '');
+        }
+        async function loadTimezoneSettings() {
+            const sel = document.getElementById('tzSelect');
+            if (!sel) return;
+            try {
+                const s = await API.get('/api/app-settings');
+                const list = s.timezones || [];
+                sel.innerHTML = list.map(z =>
+                    `<option value="${escapeHtmlAttr(z.id)}"${z.id === s.timezone ? ' selected' : ''}>${escapeHtmlText(z.label)}</option>`
+                ).join('');
+                if (s.timezone && window.CrmTime) CrmTime.setTimezone(s.timezone);
+                paintTzNow(s.today, s.now, s.timezoneLabel);
+                if (_tzClockTimer) clearInterval(_tzClockTimer);
+                _tzClockTimer = setInterval(() => {
+                    if (window.CrmTime) paintTzNow(CrmTime.todayISO(), CrmTime.nowTime(), s.timezoneLabel);
+                }, 1000);
+            } catch (e) {
+                sel.innerHTML = '<option value="Asia/Yekaterinburg">Пермь (UTC+5)</option>';
+                paintTzNow();
+            }
+        }
+        window.saveTimezone = async function() {
+            const timezone = document.getElementById('tzSelect')?.value;
+            if (!timezone) return;
+            if (!confirm('Сменить часовой пояс?\nДаты задач, проектов, расходов и напоминаний будут перенесены, если день уже другой.')) return;
+            try {
+                const res = await API.put('/api/app-settings', { timezone, migrate: true });
+                if (res.timezone && window.CrmTime) CrmTime.setTimezone(res.timezone);
+                paintTzNow(res.today, res.now, res.timezoneLabel);
+                const m = res.migration || {};
+                showToast(
+                    m.delta
+                        ? `Пояс сохранён · сдвиг ${m.delta > 0 ? '+' : ''}${m.delta} дн. · записей: ${m.updated || 0}`
+                        : 'Пояс сохранён (даты без сдвига)',
+                    'success'
+                );
+                await loadTimezoneSettings();
+            } catch (e) {
+                showToast(e.message || 'Ошибка', 'error');
+            }
+        };
+        loadTimezoneSettings();
+
         // Dashboard config export / import (validated)
         window.saveDashConfig = function() {
             try {
                 const json = DashBoard.exportConfig(user);
                 const blob = new Blob([json], { type: 'application/json' });
                 const a = document.createElement('a');
-                const stamp = new Date().toISOString().slice(0, 10);
+                const stamp = (window.CrmTime && CrmTime.todayISO()) || new Date().toISOString().slice(0, 10);
                 a.href = URL.createObjectURL(blob);
                 a.download = 'crm-dashboard-' + stamp + '.json';
                 a.click();

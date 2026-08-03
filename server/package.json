@@ -1,6 +1,6 @@
 {
   "name": "crm-backend",
-  "version": "1.2.3",
+  "version": "1.2.6",
   "description": "WebAgency CRM Backend API",
   "main": "server.js",
   "scripts": {
