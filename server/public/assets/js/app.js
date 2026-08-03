@@ -78,7 +78,7 @@ function renderSidebar(activePage) {
                 </a>
                 <a href="/pages/money.html" class="nav-item${activePage === 'money' ? ' active' : ''}">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-                    <span>Деньги</span>
+                    <span>Финансы</span>
                 </a>
             </div>
             <div class="nav-section">
@@ -86,6 +86,18 @@ function renderSidebar(activePage) {
                 <a href="/pages/settings.html" class="nav-item${activePage === 'settings' ? ' active' : ''}">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
                     <span>Настройки</span>
+                </a>
+                <a href="/pages/integrations.html" class="nav-item${activePage === 'integrations' ? ' active' : ''}" title="Интеграции: GitHub, сервер, нейросети">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 8.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z"/>
+                        <path d="M12 6.2V4.5M12 19.5v-1.7M6.2 12H4.5M19.5 12h-1.7"/>
+                        <path d="M7.05 7.05l-1.2-1.2M18.15 18.15l-1.2-1.2M7.05 16.95l-1.2 1.2M18.15 5.85l-1.2 1.2"/>
+                        <path d="M16.5 4.2a8.2 8.2 0 015.3 7" stroke-linecap="round"/>
+                        <path d="M20.5 9.2l1.3 2-2.2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M7.5 19.8a8.2 8.2 0 01-5.3-7" stroke-linecap="round"/>
+                        <path d="M3.5 14.8l-1.3-2 2.2-.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span>Интеграции</span>
                 </a>
             </div>
         </nav>
@@ -114,9 +126,10 @@ function renderHeader() {
                 <button class="sidebar-toggle" id="sidebarToggle" aria-label="Меню">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
-                <div class="header-search">
+                <div class="header-search" id="globalSearchWrap">
                     <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <input type="text" class="search-input" placeholder="Поиск..." aria-label="Поиск">
+                    <input type="text" class="search-input" id="globalSearchInput" placeholder="Поиск… Ctrl+K" aria-label="Поиск" autocomplete="off">
+                    <div class="search-dropdown" id="globalSearchDropdown" hidden></div>
                 </div>
             </div>
             <div class="header-right">
@@ -137,13 +150,13 @@ function renderHeader() {
                 <div class="header-notifications">
                     <button class="header-icon-btn" id="notifBtn" title="Уведомления" aria-label="Уведомления">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
-                        <span class="notif-badge" id="notifBadge">0</span>
+                        <span class="notif-badge" id="notifBadge" aria-hidden="true">0</span>
                     </button>
                     <div class="notif-dropdown" id="notifDropdown">
                         <div class="notif-header">
                             <span>Уведомления</span>
                             <div style="display:flex;gap:2px;align-items:center;">
-                                <button class="notif-clear" id="notifLoadMore" onclick="loadMoreNotifications(event)" title="Загрузить старые уведомления" aria-label="Загрузить старые уведомления" style="padding:4px 6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg></button>
+                                <button class="notif-clear" id="notifLoadMore" onclick="loadMoreNotifications(event)" title="Загрузить из архива" aria-label="Загрузить из архива" style="padding:4px 6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg></button>
                                 <button class="notif-clear" onclick="markAllNotificationsRead(event)" title="Прочитать все" aria-label="Прочитать все" style="padding:4px 6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"/></svg></button>
                                 <button class="notif-clear" onclick="deleteAllNotifications(event)" title="Удалить все" aria-label="Удалить все" style="padding:4px 6px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                             </div>
@@ -154,8 +167,9 @@ function renderHeader() {
                 <div class="header-user-menu">
                     <button class="header-user-btn" id="userMenuBtn" aria-label="Меню пользователя"><div class="header-avatar">${avatar}</div></button>
                     <div class="user-dropdown" id="userDropdown">
-                        <a href="/pages/settings.html" class="dropdown-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg> Настройки</a>
+                        <a href="/pages/settings.html" class="dropdown-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Настройки</a>
                         <div class="dropdown-divider"></div>
+                        <div class="dropdown-item app-version-row" id="appVersionRow" title="Версия CRM" style="opacity:0.7;cursor:default;pointer-events:none;">v…</div>
                         <a href="#" class="dropdown-item danger" onclick="API.logout()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Выйти</a>
                     </div>
                 </div>
@@ -165,14 +179,326 @@ function renderHeader() {
             <div class="content-wrapper">`;
 }
 
+// ==================== NAV TRAIL (breadcrumbs by real path) ====================
+window.NavTrail = {
+    KEY: 'crm_nav_trail',
+    SECTIONS: {
+        dashboard: { label: 'Дашборд', href: '/pages/dashboard.html' },
+        projects: { label: 'Проекты', href: '/pages/projects.html' },
+        project: { label: 'Проекты', href: '/pages/projects.html' },
+        tasks: { label: 'Задачи', href: '/pages/tasks.html' },
+        task: { label: 'Задачи', href: '/pages/tasks.html' },
+        goals: { label: 'Цели', href: '/pages/goals.html' },
+        goal: { label: 'Цели', href: '/pages/goals.html' },
+        documents: { label: 'Документы', href: '/pages/documents.html' },
+        calendar: { label: 'Календарь', href: '/pages/calendar.html' },
+        money: { label: 'Финансы', href: '/pages/money.html' },
+        settings: { label: 'Настройки', href: '/pages/settings.html' },
+        integrations: { label: 'Интеграции', href: '/pages/integrations.html' }
+    },
+    get() {
+        try {
+            const raw = sessionStorage.getItem(this.KEY);
+            const arr = raw ? JSON.parse(raw) : [];
+            return Array.isArray(arr) ? arr : [];
+        } catch (e) { return []; }
+    },
+    save(items) {
+        try { sessionStorage.setItem(this.KEY, JSON.stringify(items.slice(-8))); } catch (e) {}
+    },
+    reset(sectionKey) {
+        const s = this.SECTIONS[sectionKey];
+        if (s) this.save([{ label: s.label, href: s.href }]);
+        else this.save([]);
+    },
+    pageKeyFromPath(pathname) {
+        const file = String(pathname || '').split('/').pop() || '';
+        const map = {
+            'dashboard.html': 'dashboard',
+            'projects.html': 'projects',
+            'project.html': 'project',
+            'tasks.html': 'tasks',
+            'task.html': 'task',
+            'goals.html': 'goals',
+            'goal.html': 'goal',
+            'documents.html': 'documents',
+            'calendar.html': 'calendar',
+            'calendar-day.html': 'calendar',
+            'money.html': 'money',
+            'settings.html': 'settings',
+            'integrations.html': 'integrations'
+        };
+        return map[file] || '';
+    },
+    isListPage(key) {
+        return ['dashboard', 'projects', 'tasks', 'goals', 'documents', 'calendar', 'money', 'settings', 'integrations'].includes(key);
+    },
+    isDetailPage(key) {
+        return key === 'project' || key === 'task' || key === 'goal';
+    },
+    currentCrumbLabel() {
+        const title = document.querySelector('.page-title');
+        const t = (title && title.textContent || '').replace(/\s+/g, ' ').trim();
+        return t.slice(0, 80);
+    },
+    /** Call before navigating to href from current page */
+    prepareNavigate(href, label) {
+        try {
+            const url = new URL(href, location.origin);
+            if (!url.pathname.includes('/pages/')) return;
+            const toKey = this.pageKeyFromPath(url.pathname);
+            const fromKey = this.pageKeyFromPath(location.pathname);
+            if (!toKey) return;
+            if (this.isListPage(toKey) && toKey !== 'calendar') {
+                this.reset(toKey);
+                return;
+            }
+            let trail = this.get();
+            const here = location.pathname + location.search;
+
+            // From list/dashboard: start trail from that page only (no fake middles)
+            if (this.isListPage(fromKey)) {
+                const s = this.SECTIONS[fromKey];
+                trail = s ? [{ label: s.label, href: here }] : [];
+            } else if (this.isDetailPage(fromKey)) {
+                // Project → epic → child → grandchild: keep chain, pin current page
+                const hereLabel = this.currentCrumbLabel()
+                    || (this.SECTIONS[fromKey] && this.SECTIONS[fromKey].label)
+                    || '…';
+                const idx = trail.findIndex(c => c.href === here);
+                if (idx >= 0) {
+                    trail = trail.slice(0, idx + 1);
+                    trail[idx].label = hereLabel || trail[idx].label;
+                } else {
+                    trail.push({ label: hereLabel, href: here });
+                }
+            } else if (!trail.length && fromKey) {
+                const s = this.SECTIONS[fromKey];
+                if (s) trail = [{ label: s.label, href: s.href }];
+            }
+
+            const crumb = {
+                label: (label || '').trim().slice(0, 80) || url.pathname,
+                href: url.pathname + url.search
+            };
+            // Navigating to an existing crumb (back) — truncate
+            const existIdx = trail.findIndex(c => c.href === crumb.href);
+            if (existIdx >= 0) {
+                trail = trail.slice(0, existIdx);
+            }
+            if (trail.length && trail[trail.length - 1].href === crumb.href) {
+                trail[trail.length - 1] = crumb;
+            } else {
+                trail.push(crumb);
+            }
+            this.save(trail);
+        } catch (e) {}
+    },
+    /**
+     * On task page load: keep click-path if last crumb is parent/project,
+     * otherwise rebuild Projects → Project → parent chain.
+     */
+    syncTaskTrail(task, project) {
+        if (!task || !task.id) return;
+        const here = '/pages/task.html?id=' + encodeURIComponent(task.id);
+        let trail = this.get().filter(c => c && c.href !== here);
+        const parentHref = task.parent_id
+            ? '/pages/task.html?id=' + encodeURIComponent(task.parent_id)
+            : '';
+        const projectHref = project && project.id
+            ? '/pages/project.html?id=' + encodeURIComponent(project.id)
+            : '';
+        const last = trail[trail.length - 1];
+        const lastOk = last && (
+            (parentHref && last.href === parentHref) ||
+            (!task.parent_id && projectHref && last.href === projectHref) ||
+            (!task.parent_id && !projectHref && /\/tasks\.html/.test(last.href)) ||
+            (!task.parent_id && /\/dashboard\.html/.test(last.href)) ||
+            (!task.parent_id && /\/calendar-day\.html/.test(last.href))
+        );
+        if (lastOk) {
+            this.save(trail);
+            return;
+        }
+        // Structural fallback: section → project → ancestors
+        const chain = [];
+        if (project && project.id) {
+            chain.push({ label: 'Проекты', href: '/pages/projects.html' });
+            chain.push({
+                label: (project.name || 'Проект').slice(0, 80),
+                href: projectHref
+            });
+        } else {
+            chain.push({ label: 'Задачи', href: '/pages/tasks.html' });
+        }
+        const byId = {};
+        try {
+            (typeof CRM !== 'undefined' && CRM.getTasks ? CRM.getTasks() : []).forEach(t => {
+                if (t && t.id) byId[t.id] = t;
+            });
+        } catch (e) {}
+        const ancestors = [];
+        let pid = task.parent_id;
+        let guard = 0;
+        while (pid && guard++ < 40) {
+            const p = byId[pid];
+            if (!p) break;
+            ancestors.unshift({
+                label: String(p.name || 'Задача').slice(0, 80),
+                href: '/pages/task.html?id=' + encodeURIComponent(p.id)
+            });
+            pid = p.parent_id;
+        }
+        this.save(chain.concat(ancestors));
+    },
+    /** HTML crumbs ending with currentLabel (not a link) */
+    render(currentLabel) {
+        let trail = this.get();
+        const cur = String(currentLabel || '').trim();
+        const here = location.pathname + location.search;
+        if (trail.length && trail[trail.length - 1].href === here) {
+            trail = trail.slice(0, -1);
+        }
+        if (!trail.length) {
+            const key = this.pageKeyFromPath(location.pathname);
+            const s = this.SECTIONS[key];
+            if (s && !this.isListPage(key)) {
+                trail = [{ label: s.label, href: s.href }];
+            }
+        }
+        if (!trail.length && !cur) return '';
+        const sep = '<span class="text-sm text-muted" style="margin:0 8px;">/</span>';
+        const parts = [];
+        trail.forEach((c, i) => {
+            if (i) parts.push(sep);
+            parts.push(`<a href="${escapeHtmlAttr(c.href)}" class="text-sm text-muted nav-trail-link">${escapeHtmlText(c.label)}</a>`);
+        });
+        if (cur) {
+            if (trail.length) parts.push(sep);
+            parts.push(`<span class="text-sm fw-600">${escapeHtmlText(cur)}</span>`);
+        }
+        return `<div class="nav-trail" style="margin-bottom:10px;display:flex;align-items:center;flex-wrap:wrap;">${parts.join('')}</div>`;
+    }
+};
+
+/** Navigate with breadcrumb capture (use instead of location.href for in-app links) */
+window.crmGo = function(href, label) {
+    if (typeof NavTrail !== 'undefined') NavTrail.prepareNavigate(href, label || '');
+    window.location.href = href;
+};
+
+function initNavTrailCapture() {
+    if (window._navTrailBound) return;
+    window._navTrailBound = true;
+    document.addEventListener('click', (e) => {
+        const a = e.target.closest && e.target.closest('a[href*="/pages/"]');
+        if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const href = a.getAttribute('href');
+        if (!href || href.startsWith('#')) return;
+        const label = a.getAttribute('data-nav-label')
+            || a.getAttribute('title')
+            || (a.querySelector('.cal-day-item-title, .task-name, .db-row-title') || a).textContent;
+        NavTrail.prepareNavigate(href, String(label || '').replace(/\s+/g, ' ').trim());
+    }, true);
+}
+
+// ==================== GLOBAL SEARCH ====================
+function initGlobalSearch() {
+    const input = document.getElementById('globalSearchInput');
+    const dd = document.getElementById('globalSearchDropdown');
+    if (!input || !dd || input.dataset.bound === '1') return;
+    input.dataset.bound = '1';
+    let timer = null;
+    let seq = 0;
+
+    const typeLabel = {
+        project: 'Проект', task: 'Задача', goal: 'Цель',
+        document: 'Документ', reminder: 'Напоминание', expense: 'Расход'
+    };
+
+    function hide() { dd.hidden = true; dd.innerHTML = ''; }
+
+    function renderItems(items, q) {
+        if (!items.length) {
+            dd.innerHTML = `<div class="search-empty">Ничего не найдено по «${escapeHtmlText(q)}»</div>`;
+            dd.hidden = false;
+            return;
+        }
+        dd.innerHTML = items.map((it, idx) => `
+            <button type="button" class="search-item" data-href="${escapeHtmlAttr(it.href)}" data-idx="${idx}">
+                <span class="search-item-type">${escapeHtmlText(typeLabel[it.type] || it.type)}</span>
+                <span class="search-item-title">${escapeHtmlText(it.title)}</span>
+                ${it.subtitle ? `<span class="search-item-sub">${escapeHtmlText(it.subtitle)}</span>` : ''}
+            </button>`).join('');
+        dd.hidden = false;
+        dd.querySelectorAll('.search-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const href = btn.getAttribute('data-href');
+                if (!href) return;
+                NavTrail.prepareNavigate(href, btn.querySelector('.search-item-title')?.textContent || '');
+                location.href = href;
+            });
+        });
+    }
+
+    async function runSearch(q) {
+        const my = ++seq;
+        if (!q || q.length < 1) { hide(); return; }
+        try {
+            const data = await API.get('/api/search?q=' + encodeURIComponent(q) + '&limit=12');
+            if (my !== seq) return;
+            renderItems((data && data.items) || [], q);
+        } catch (e) {
+            if (my !== seq) return;
+            dd.innerHTML = '<div class="search-empty">Ошибка поиска</div>';
+            dd.hidden = false;
+        }
+    }
+
+    input.addEventListener('input', () => {
+        clearTimeout(timer);
+        const q = input.value.trim();
+        timer = setTimeout(() => runSearch(q), 180);
+    });
+    input.addEventListener('focus', () => {
+        if (input.value.trim()) runSearch(input.value.trim());
+    });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { hide(); input.blur(); }
+        if (e.key === 'Enter') {
+            const first = dd.querySelector('.search-item');
+            if (first) { e.preventDefault(); first.click(); }
+        }
+    });
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#globalSearchWrap')) hide();
+    });
+}
+
 // ==================== INIT COMMON UI ====================
 function initCommonUI() {
     // Badges must refresh on every call: pages re-render the whole #app on tab
     // switches, which resets the badge elements to their "0" template values
     updateBadges();
+    initGlobalSearch();
+    // Version label (re-rendered with header)
+    (async () => {
+        const el = document.getElementById('appVersionRow');
+        if (!el) return;
+        try {
+            const info = await API.get('/api/app-info');
+            const v = (info && info.version) || '—';
+            window.CRM_APP_VERSION = v;
+            el.textContent = 'v' + v;
+            el.title = 'CRM WebAgency ' + v;
+        } catch (e) {
+            el.textContent = 'v—';
+        }
+    })();
 
     if (window._commonUIInit) return;
     window._commonUIInit = true;
+    initNavTrailCapture();
 
     // Overlay for mobile sidebar (lives outside #app, so created once)
     const sidebarOverlay = document.createElement('div');
@@ -194,6 +520,12 @@ function initCommonUI() {
     // after pages replace the whole DOM via app.innerHTML = ...
     document.addEventListener('click', (e) => {
         const sidebar = document.getElementById('sidebar');
+
+        const navItem = e.target.closest('.sidebar-nav .nav-item[href]');
+        if (navItem) {
+            const key = NavTrail.pageKeyFromPath(navItem.getAttribute('href') || '');
+            if (key) NavTrail.reset(key);
+        }
 
         if (e.target.closest('#sidebarToggle')) {
             if (sidebar) {
@@ -220,7 +552,10 @@ function initCommonUI() {
             const dd = document.getElementById('notifDropdown');
             const wasOpen = dd && dd.classList.contains('show');
             closeAll();
-            if (dd && !wasOpen) dd.classList.add('show');
+            if (dd && !wasOpen) {
+                dd.classList.add('show');
+                refreshNotifList(true);
+            }
             return;
         }
 
@@ -310,26 +645,142 @@ function initCommonUI() {
 
 }
 
-// Notification pagination state
-let _notifState = { offset: 0, total: 0 };
+// Notification pagination: active inbox + soft-delete archive (current user only)
+let _notifState = {
+    activeOffset: 0,
+    activeTotal: 0,
+    archiveOffset: 0,
+    archiveTotal: 0,
+    unread: 0,
+    reminderCount: 0,
+    loading: false,
+    archiveLabelShown: false
+};
+
+function resetNotifState() {
+    _notifState = {
+        activeOffset: 0,
+        activeTotal: 0,
+        archiveOffset: 0,
+        archiveTotal: 0,
+        unread: 0,
+        reminderCount: 0,
+        loading: false,
+        archiveLabelShown: false
+    };
+}
+
+function todayLocalISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function setNotifBadge(count) {
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    const n = Math.max(0, Number(count) || 0);
+    badge.textContent = String(n);
+    badge.classList.toggle('is-on', n > 0);
+    badge.setAttribute('aria-hidden', n > 0 ? 'false' : 'true');
+}
+
+function escapeNotifHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function plainNotifText(html) {
+    if (typeof stripHtmlText === 'function') return stripHtmlText(html || '');
+    return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
 function renderNotifItem(n) {
     let time = '';
     if (n.created_at) {
-        const dt = new Date(n.created_at.replace(' ', 'T') + 'Z');
-        if (!isNaN(dt)) time = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        const dt = new Date(String(n.created_at).includes('T') ? n.created_at : String(n.created_at).replace(' ', 'T') + 'Z');
+        if (!isNaN(dt.getTime())) {
+            time = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' '
+                + dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        }
     }
-    return `<div class="notif-item${n.is_read ? '' : ' unread'}" data-notif-id="${n.id}" onclick="openNotification(event, ${n.id}, '${n.task_id || ''}', '${n.project_id || ''}')" style="cursor:pointer;">
+    const tid = String(n.task_id || '').replace(/'/g, '');
+    const pid = String(n.project_id || '').replace(/'/g, '');
+    const archived = !!n.is_archived;
+    return `<div class="notif-item${n.is_read || archived ? '' : ' unread'}${archived ? ' notif-archived' : ''}" data-notif-id="${n.id}" onclick="openNotification(event, ${n.id}, '${tid}', '${pid}')" style="cursor:pointer;">
         <div class="notif-dot"></div>
         <div class="notif-content">
-            <p>${n.message}</p>
-            <span class="notif-time">${time}</span>
+            <p>${escapeNotifHtml(n.message)}</p>
+            <span class="notif-time">${archived ? 'Архив · ' : ''}${escapeNotifHtml(time)}</span>
         </div>
     </div>`;
 }
 
-// The load-more button is always visible; nothing to toggle
-function updateLoadMoreVisibility() {}
+function renderReminderNotifItem(r) {
+    const dateISO = (r.remind_date && /^\d{4}-\d{2}-\d{2}$/.test(String(r.remind_date).slice(0, 10)))
+        ? String(r.remind_date).slice(0, 10) : '';
+    const dateLabel = dateISO
+        ? new Date(dateISO + 'T12:00:00').toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+        : '';
+    const text = plainNotifText(r.message) || 'Напоминание';
+    return `<div class="notif-item unread" data-reminder-id="${r.id}" data-remind-date="${escapeNotifHtml(dateISO)}" onclick="openReminderFromNotif(event, '${escapeNotifHtml(dateISO)}')" style="cursor:pointer;">
+        <div class="notif-dot"></div>
+        <div class="notif-content">
+            <p>${escapeNotifHtml(text)}</p>
+            <span class="notif-time">${escapeNotifHtml(dateLabel)}</span>
+        </div>
+        <button class="notif-dismiss" onclick="dismissNotification(${r.id}, event)" title="Закрыть" aria-label="Закрыть уведомление">&times;</button>
+    </div>`;
+}
+
+function updateLoadMoreVisibility() {
+    const btn = document.getElementById('notifLoadMore');
+    if (!btn) return;
+    btn.style.display = '';
+    btn.disabled = !!_notifState.loading;
+    btn.style.opacity = _notifState.loading ? '0.5' : '';
+}
+
+function isNotifDropdownOpen() {
+    const dd = document.getElementById('notifDropdown');
+    return !!(dd && dd.classList.contains('show'));
+}
+
+function applyActiveNotifPage(notifData, reminders) {
+    _notifState.activeOffset = (notifData.items || []).length;
+    _notifState.activeTotal = notifData.total || 0;
+    _notifState.archiveOffset = 0;
+    _notifState.archiveTotal = notifData.archiveTotal || 0;
+    _notifState.unread = notifData.unread || 0;
+    _notifState.reminderCount = (reminders || []).length;
+    _notifState.archiveLabelShown = false;
+    const list = document.getElementById('notifList');
+    if (!list) return;
+    let html = (reminders || []).map(renderReminderNotifItem).join('');
+    html += (notifData.items || []).map(n => renderNotifItem({ ...n, is_archived: false })).join('');
+    list.innerHTML = html || '<div style="padding:20px;text-align:center;font-size:0.85rem;color:var(--gray-400);">Нет уведомлений</div>';
+    setNotifBadge(_notifState.reminderCount + _notifState.unread);
+    updateLoadMoreVisibility();
+}
+
+/** Rebuild reminder + first page of active notifications */
+async function refreshNotifList(force) {
+    if (_notifState.loading) return;
+    const list = document.getElementById('notifList');
+    if (!list) return;
+    if (!force && isNotifDropdownOpen()) return;
+    _notifState.loading = true;
+    try {
+        let reminders = [];
+        let notifData = { items: [], unread: 0, total: 0, archiveTotal: 0 };
+        try { reminders = (await API.get('/api/reminders?active=true')) || []; } catch (err) {}
+        try { notifData = (await API.get('/api/notifications?limit=10&offset=0&archived=0')) || notifData; } catch (err) {}
+        applyActiveNotifPage(notifData, reminders);
+    } finally {
+        _notifState.loading = false;
+        updateLoadMoreVisibility();
+    }
+}
 
 // Update sidebar badges + notification dropdown
 async function updateBadges() {
@@ -337,45 +788,33 @@ async function updateBadges() {
         const stats = await API.getStats();
         const projectsBadge = document.getElementById('projectsBadge');
         const tasksBadge = document.getElementById('tasksBadge');
-        const notifBadge = document.getElementById('notifBadge');
-        
         if (projectsBadge) projectsBadge.textContent = stats.activeProjects;
         if (tasksBadge) tasksBadge.textContent = stats.pendingTasks;
 
-        // Payment reminders + task notifications
         let reminders = [];
-        let notifData = { items: [], unread: 0, total: 0 };
+        let notifData = { items: [], unread: 0, total: 0, archiveTotal: 0 };
         try { reminders = (await API.get('/api/reminders?active=true')) || []; } catch (err) {}
-        try { notifData = (await API.get('/api/notifications?limit=10&offset=0')) || notifData; } catch (err) {}
-        _notifState = { offset: notifData.items.length, total: notifData.total };
+        try { notifData = (await API.get('/api/notifications?limit=10&offset=0&archived=0')) || notifData; } catch (err) {}
+        _notifState.unread = notifData.unread || 0;
+        _notifState.reminderCount = reminders.length;
+        _notifState.activeTotal = notifData.total || 0;
+        _notifState.archiveTotal = notifData.archiveTotal || 0;
+        setNotifBadge(_notifState.reminderCount + _notifState.unread);
 
-        const notifList = document.getElementById('notifList');
-        if (notifList) {
-            let html = reminders.map(r => {
-                const date = r.remind_date ? new Date(r.remind_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
-                return `<div class="notif-item unread" data-reminder-id="${r.id}">
-                    <div class="notif-dot"></div>
-                    <div class="notif-content">
-                        <p>${r.message}</p>
-                        <span class="notif-time">${date}</span>
-                    </div>
-                    <button class="notif-dismiss" onclick="dismissNotification(${r.id}, event)" title="Закрыть" aria-label="Закрыть уведомление">&times;</button>
-                </div>`;
-            }).join('');
-            html += notifData.items.map(renderNotifItem).join('');
-            notifList.innerHTML = html || '<div style="padding:20px;text-align:center;font-size:0.85rem;color:var(--gray-400);">Нет уведомлений</div>';
-        }
-        updateLoadMoreVisibility();
-
-        if (notifBadge) {
-            const count = reminders.length + (notifData.unread || 0);
-            notifBadge.textContent = count;
-            notifBadge.style.display = count > 0 ? 'flex' : 'none';
+        if (!isNotifDropdownOpen()) {
+            applyActiveNotifPage(notifData, reminders);
         }
     } catch (err) {
         console.error('Failed to update badges:', err);
     }
 }
+
+window.openReminderFromNotif = function(e, dateISO) {
+    if (e && e.target && e.target.closest && e.target.closest('.notif-dismiss')) return;
+    if (e) e.stopPropagation();
+    const d = (dateISO && /^\d{4}-\d{2}-\d{2}$/.test(dateISO)) ? dateISO : todayLocalISO();
+    window.location.href = '/pages/calendar-day.html?date=' + encodeURIComponent(d);
+};
 
 // Open the task/project a notification refers to
 async function openNotification(e, id, taskId, projectId) {
@@ -395,51 +834,90 @@ async function markAllNotificationsRead(e) {
     if (e) e.stopPropagation();
     try {
         await API.put('/api/notifications/read-all');
-        document.querySelectorAll('.notif-item[data-notif-id]').forEach(item => item.classList.remove('unread'));
-        const badge = document.getElementById('notifBadge');
-        const remindersCount = document.querySelectorAll('.notif-item[data-reminder-id]').length;
-        if (badge) {
-            badge.textContent = remindersCount;
-            badge.style.display = remindersCount > 0 ? 'flex' : 'none';
-        }
+        document.querySelectorAll('.notif-item[data-notif-id]:not(.notif-archived)').forEach(item => item.classList.remove('unread'));
+        _notifState.unread = 0;
+        setNotifBadge(_notifState.reminderCount || document.querySelectorAll('.notif-item[data-reminder-id]').length);
     } catch (err) {}
 }
 
-// Delete all notifications and reminders (cross button)
+// Archive all active notifications + dismiss active reminders
 async function deleteAllNotifications(e) {
     if (e) e.stopPropagation();
     try {
         await API.delete('/api/notifications/all');
-        const reminderItems = document.querySelectorAll('.notif-item[data-reminder-id]');
+        const reminderItems = [...document.querySelectorAll('.notif-item[data-reminder-id]')];
         for (const item of reminderItems) {
-            try { await API.delete(`/api/reminders/${item.dataset.reminderId}`); } catch (err) {}
+            try { await API.put(`/api/reminders/${item.dataset.reminderId}/sent`); } catch (err) {
+                try { await API.delete(`/api/reminders/${item.dataset.reminderId}`); } catch (err2) {}
+            }
         }
-        _notifState = { offset: 0, total: 0 };
+        const archTotal = (_notifState.activeTotal || 0) + (_notifState.archiveTotal || 0);
+        resetNotifState();
+        _notifState.archiveTotal = archTotal;
         const list = document.getElementById('notifList');
-        if (list) list.innerHTML = '<div style="padding:20px;text-align:center;font-size:0.85rem;color:var(--gray-400);">Нет уведомлений</div>';
-        const badge = document.getElementById('notifBadge');
-        if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+        if (list) list.innerHTML = '<div style="padding:20px;text-align:center;font-size:0.85rem;color:var(--gray-400);">Нет уведомлений · можно загрузить из архива</div>';
+        setNotifBadge(0);
         updateLoadMoreVisibility();
+        if (typeof showToast === 'function') showToast('Уведомления в архиве', 'info');
     } catch (err) {}
 }
 
-// Load older notifications, 10 at a time (circular arrow button)
+// Load more active, then archive (current user only)
 async function loadMoreNotifications(e) {
     if (e) e.stopPropagation();
+    if (_notifState.loading) return;
+    _notifState.loading = true;
+    updateLoadMoreVisibility();
     try {
-        const data = await API.get(`/api/notifications?limit=10&offset=${_notifState.offset}`);
-        if (data && data.items.length > 0) {
-            const list = document.getElementById('notifList');
-            if (list) list.insertAdjacentHTML('beforeend', data.items.map(renderNotifItem).join(''));
-            _notifState.offset += data.items.length;
-            _notifState.total = data.total;
-        } else if (typeof showToast === 'function') {
-            showToast('Старых уведомлений больше нет', 'info');
+        const list = document.getElementById('notifList');
+        const clearEmpty = () => {
+            if (!list) return;
+            const empty = list.querySelector('div[style*="text-align:center"]');
+            if (empty && !list.querySelector('.notif-item')) empty.remove();
+        };
+
+        // 1) More active inbox items
+        if ((_notifState.activeOffset || 0) < (_notifState.activeTotal || 0)) {
+            const data = await API.get(`/api/notifications?limit=10&offset=${_notifState.activeOffset}&archived=0`);
+            if (data && data.items && data.items.length) {
+                clearEmpty();
+                if (list) list.insertAdjacentHTML('beforeend', data.items.map(n => renderNotifItem({ ...n, is_archived: false })).join(''));
+                _notifState.activeOffset += data.items.length;
+                _notifState.activeTotal = data.total;
+                _notifState.archiveTotal = data.archiveTotal || _notifState.archiveTotal;
+                if (typeof data.unread === 'number') _notifState.unread = data.unread;
+                return;
+            }
+            _notifState.activeOffset = _notifState.activeTotal;
         }
-    } catch (err) {}
+
+        // 2) Archive (current user only)
+        if ((_notifState.archiveOffset || 0) < (_notifState.archiveTotal || 0)) {
+            const data = await API.get(`/api/notifications?limit=10&offset=${_notifState.archiveOffset || 0}&archived=1`);
+            _notifState.archiveTotal = data?.total ?? 0;
+            if (data && data.items && data.items.length) {
+                clearEmpty();
+                if (list && !_notifState.archiveLabelShown) {
+                    list.insertAdjacentHTML('beforeend',
+                        '<div class="notif-archive-sep" style="padding:8px 14px;font-size:0.75rem;color:var(--gray-400);border-top:1px solid var(--gray-100);">Архив</div>');
+                    _notifState.archiveLabelShown = true;
+                }
+                if (list) list.insertAdjacentHTML('beforeend', data.items.map(n => renderNotifItem({ ...n, is_archived: true })).join(''));
+                _notifState.archiveOffset += data.items.length;
+                return;
+            }
+        }
+
+        if (typeof showToast === 'function') showToast('В архиве больше нет уведомлений', 'info');
+    } catch (err) {
+        if (typeof showToast === 'function') showToast('Не удалось загрузить архив', 'error');
+    } finally {
+        _notifState.loading = false;
+        updateLoadMoreVisibility();
+    }
 }
 
-// Dismiss a single notification
+// Dismiss a single reminder from the notification tray
 async function dismissNotification(reminderId, e) {
     if (e) e.stopPropagation();
     try {
@@ -451,15 +929,8 @@ async function dismissNotification(reminderId, e) {
             item.style.transform = 'translateX(20px)';
             setTimeout(() => item.remove(), 200);
         }
-        // Update badge count
-        const badge = document.getElementById('notifBadge');
-        if (badge) {
-            const count = parseInt(badge.textContent) || 0;
-            const newCount = Math.max(0, count - 1);
-            badge.textContent = newCount;
-            badge.style.display = newCount > 0 ? 'flex' : 'none';
-        }
-        // Show empty state if no more items
+        _notifState.reminderCount = Math.max(0, (_notifState.reminderCount || 1) - 1);
+        setNotifBadge(_notifState.reminderCount + (_notifState.unread || 0));
         setTimeout(() => {
             const list = document.getElementById('notifList');
             if (list && !list.querySelector('.notif-item')) {
@@ -895,7 +1366,7 @@ const CRMKeys = {
         { keys: 'Ctrl+3', label: 'Задачи', match: (e) => (e.ctrlKey || e.metaKey) && e.key === '3', go: '/pages/tasks.html' },
         { keys: 'Ctrl+4', label: 'Цели', match: (e) => (e.ctrlKey || e.metaKey) && e.key === '4', go: '/pages/goals.html' },
         { keys: 'Ctrl+5', label: 'Календарь', match: (e) => (e.ctrlKey || e.metaKey) && e.key === '5', go: '/pages/calendar.html' },
-        { keys: 'Ctrl+6', label: 'Деньги', match: (e) => (e.ctrlKey || e.metaKey) && e.key === '6', go: '/pages/money.html' },
+        { keys: 'Ctrl+6', label: 'Финансы', match: (e) => (e.ctrlKey || e.metaKey) && e.key === '6', go: '/pages/money.html' },
         { keys: 'Ctrl+7', label: 'Настройки', match: (e) => (e.ctrlKey || e.metaKey) && e.key === '7', go: '/pages/settings.html' },
         { keys: 'Ctrl+Z', label: 'Отмена (на странице)', match: (e) => (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey, action: 'undo' },
         { keys: 'Ctrl+Y', label: 'Повтор (на странице)', match: (e) => (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey)), action: 'redo' },
@@ -1812,7 +2283,17 @@ function bindRichEditor(id, { onBlur, onChange } = {}) {
         }
     });
 
-    body.addEventListener('input', () => emitChange());
+    body.addEventListener('focus', () => {
+        if (body.classList.contains('rich-empty')) {
+            body.classList.remove('rich-empty');
+            body.innerHTML = '';
+        }
+    });
+
+    body.addEventListener('input', () => {
+        body.classList.remove('rich-empty');
+        emitChange();
+    });
 
     // Close on outside click — skip modal action buttons
     const onDocPointer = (e) => {
@@ -1904,6 +2385,175 @@ function flushAllRichEditors() {
         }
     });
 }
+
+/** Meta line for note reminder cards: created_at + author if not me */
+window.formatNoteReminderMeta = function(r) {
+    const me = (API.getCurrentUser && API.getCurrentUser())?.name || '';
+    let when = '';
+    if (r && r.created_at) {
+        try {
+            const d = new Date(r.created_at.includes('T') ? r.created_at : String(r.created_at).replace(' ', 'T'));
+            if (!isNaN(d.getTime())) {
+                when = d.toLocaleString('ru-RU', {
+                    day: '2-digit', month: '2-digit', year: '2-digit',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            }
+        } catch (e) {}
+        if (!when) when = String(r.created_at).slice(0, 16);
+    }
+    const by = (r && r.created_by) ? String(r.created_by).trim() : '';
+    if (by && me && by !== me) return (when ? when + ' · ' : '') + by;
+    return when;
+};
+
+/**
+ * Unified "note reminder" modal (dashboard + calendar day).
+ * opts: { date?: 'YYYY-MM-DD'|'', onCreated?: fn }
+ */
+window.showNoteReminderModal = async function(opts) {
+    const options = opts && typeof opts === 'object' ? opts : { date: opts || '' };
+    const dateVal = options.date != null ? String(options.date).trim().slice(0, 10) : '';
+    const presetDate = /^\d{4}-\d{2}-\d{2}$/.test(dateVal) ? dateVal : '';
+    const todayLocal = (() => {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    })();
+    const onCreated = typeof options.onCreated === 'function' ? options.onCreated : null;
+    window._noteReminderOnCreated = onCreated;
+    const draftKey = presetDate ? ('note_reminder_' + presetDate) : 'note_reminder_dash';
+    const draft = (typeof DraftStore !== 'undefined' && DraftStore.load(draftKey)) || {};
+    const initialHtml = draft.message || '';
+    const initialDate = draft.remind_date || presetDate || todayLocal;
+    const me = (API.getCurrentUser && API.getCurrentUser())?.name || '';
+    let users = [];
+    try { users = await API.get('/api/users') || []; } catch (e) { users = []; }
+    if (!users.length && me) users = [{ name: me }];
+    const forUser = draft.for_user || me;
+    const userOpts = users.map(u => {
+        const n = u.name || u.username || '';
+        return `<option value="${escapeHtmlAttr(n)}"${n === forUser ? ' selected' : ''}>${escapeHtmlText(n)}</option>`;
+    }).join('');
+
+    const overlay = document.getElementById('modalOverlay');
+    if (!overlay) {
+        if (typeof showToast === 'function') showToast('Модальное окно недоступно', 'error');
+        return;
+    }
+    overlay.innerHTML = `
+        <div class="modal modal-lg" onclick="event.stopPropagation()" data-draft-key="${escapeHtmlAttr(draftKey)}">
+            <div class="modal-header">
+                <h3 class="modal-title">Новое напоминание</h3>
+                <button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Текст *</label>
+                    ${renderRichEditor('noteRemBody', initialHtml, 'О чём напомнить…', { alwaysOpen: true })}
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="noteRemDate">Дата</label>
+                        <input type="date" class="form-input" id="noteRemDate" value="${escapeHtmlAttr(initialDate)}">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="noteRemForUser">Для кого *</label>
+                        <select class="form-select" id="noteRemForUser">${userOpts}</select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal(true)">Отмена</button>
+                <button type="button" class="btn btn-primary" id="noteRemSubmitBtn">Создать</button>
+            </div>
+        </div>`;
+    overlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+
+    const collectDraft = () => ({
+        message: getDescValue('noteRemBody'),
+        remind_date: document.getElementById('noteRemDate')?.value || '',
+        for_user: document.getElementById('noteRemForUser')?.value || ''
+    });
+
+    bindRichEditor('noteRemBody', {
+        onChange: () => {
+            if (typeof DraftStore === 'undefined') return;
+            DraftStore.save(draftKey, collectDraft());
+        }
+    });
+    const wrap = document.querySelector('[data-rich-wrap="noteRemBody"]');
+    const body = document.getElementById('noteRemBody');
+    if (wrap && body) {
+        wrap.classList.remove('rich-collapsed');
+        wrap.dataset.richOpen = '1';
+        wrap.style.minHeight = '180px';
+        wrap.style.resize = 'vertical';
+        wrap.style.overflow = 'auto';
+        // Open for typing: clear stuck placeholder class (like openEditor)
+        if (stripHtmlText(initialHtml)) {
+            body.classList.remove('rich-empty');
+        } else {
+            body.innerHTML = '';
+            body.classList.remove('rich-empty');
+        }
+        body.contentEditable = 'true';
+        setTimeout(() => {
+            body.focus();
+            if (!stripHtmlText(body.innerHTML)) {
+                body.classList.remove('rich-empty');
+                body.innerHTML = '';
+            }
+        }, 40);
+    }
+    if (typeof DraftStore !== 'undefined') {
+        DraftStore.bind(draftKey, collectDraft, () => {});
+    }
+    document.getElementById('noteRemSubmitBtn')?.addEventListener('click', () => {
+        window.createNoteReminderFromModal(draftKey);
+    });
+};
+
+// Back-compat aliases
+window.showNewNoteReminderModal = function(defaultDate) {
+    const d = defaultDate == null ? '' : String(defaultDate);
+    window.showNoteReminderModal({ date: d });
+};
+
+window.createNoteReminderFromModal = async function(draftKey) {
+    const modal = document.querySelector('.modal-overlay.show .modal') || document;
+    const submitBtn = document.getElementById('noteRemSubmitBtn') || modal.querySelector('.btn-primary');
+    await withButtonLock(submitBtn, async () => {
+        const message = getDescValue('noteRemBody');
+        if (!stripHtmlText(message)) {
+            showToast('Введите текст напоминания', 'error');
+            return;
+        }
+        const d = document.getElementById('noteRemDate')?.value || '';
+        if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+            showToast('Некорректная дата', 'error');
+            return;
+        }
+        const for_user = document.getElementById('noteRemForUser')?.value || '';
+        if (!for_user) {
+            showToast('Выберите пользователя', 'error');
+            return;
+        }
+        const payload = { message, remind_date: d, for_user };
+        try {
+            await API.post('/api/reminders', payload);
+        } catch (err) {
+            showToast('Ошибка: ' + (err.message || 'не создано'), 'error');
+            return;
+        }
+        if (draftKey && typeof DraftStore !== 'undefined') DraftStore.clear(draftKey);
+        closeModal();
+        showToast('Напоминание создано', 'success');
+        const cb = window._noteReminderOnCreated;
+        window._noteReminderOnCreated = null;
+        if (typeof cb === 'function') await cb();
+    });
+};
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {

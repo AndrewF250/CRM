@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Задачи — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=38">
+    <link rel="stylesheet" href="/assets/css/style.css?v=54">
     <style>
         .task-card { background: var(--white); border: 1px solid var(--gray-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px; transition: all 0.15s; overflow: visible; }
         .task-card:hover { box-shadow: var(--shadow-sm); }
@@ -81,7 +81,7 @@
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=18"></script>
-    <script src="/assets/js/app.js?v=34"></script>
+    <script src="/assets/js/app.js?v=49"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -663,7 +663,7 @@
                     ? `<button type="button" class="task-action-btn play" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskPause('${t.id}')" title="Продолжить" aria-label="Продолжить"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></button>`
                     : `<button type="button" class="task-action-btn pause" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();toggleTaskPause('${t.id}')" title="Пауза" aria-label="Пауза"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>`;
             }
-            items += `<button type="button" class="task-action-btn gear" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();location.href='/pages/task.html?id=${t.id}'" title="Открыть задачу" aria-label="Открыть задачу"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>`;
+            items += `<button type="button" class="task-action-btn gear" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();crmGo('/pages/task.html?id=' + '${t.id}', '${(t.name || '').replace(/'/g, '')}')" title="Открыть задачу" aria-label="Открыть задачу"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>`;
             items += `<button type="button" class="task-action-btn add-child" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();showAddNestedTask('${t.id}')" title="Вложенная задача" aria-label="Вложенная задача"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>`;
             items += `<button type="button" class="task-action-btn clone" draggable="false" ondragstart="event.preventDefault()" onclick="event.stopPropagation();cloneTask('${t.id}')" title="Копировать" aria-label="Копировать"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>`;
             if (isChild) {
@@ -751,7 +751,7 @@
 
                 const dateRange = formatTaskDateRange(t);
 
-                let html = `<div class="task-card${isDone ? ' done' : ''}${isChild ? ' child' : ''}" data-task-id="${t.id}" draggable="true" style="border-left-color:${statusHex};" onclick="if(!event.target.closest('.task-actions') && !event.target.closest('a') && !event.target.closest('input') && !event.target.closest('button') && !event.target.closest('.desc-clamp-wrap'))location.href='/pages/task.html?id=${t.id}'">
+                let html = `<div class="task-card${isDone ? ' done' : ''}${isChild ? ' child' : ''}" data-task-id="${t.id}" draggable="true" style="border-left-color:${statusHex};" onclick="if(!event.target.closest('.task-actions') && !event.target.closest('a') && !event.target.closest('input') && !event.target.closest('button') && !event.target.closest('.desc-clamp-wrap'))crmGo('/pages/task.html?id=' + '${t.id}', '${(t.name || '').replace(/'/g, '')}')">
                     <div style="display:flex;align-items:flex-start;gap:12px;">
                         <div style="flex:1;min-width:0;">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
@@ -894,7 +894,7 @@
                     const project = CRM.getProject(t.project_id);
                     const children = tasks.filter(ch => ch.parent_id === t.id);
                     const range = formatTaskDateRange(t);
-                    html += `<div class="kanban-card${t.done ? ' done' : ''}" draggable="true" data-task-id="${t.id}" style="border-left-color:${hex};" onclick="if(!event.target.closest('.task-actions') && !event.target.closest('.desc-clamp-wrap'))location.href='/pages/task.html?id=${t.id}'">
+                    html += `<div class="kanban-card${t.done ? ' done' : ''}" draggable="true" data-task-id="${t.id}" style="border-left-color:${hex};" onclick="if(!event.target.closest('.task-actions') && !event.target.closest('.desc-clamp-wrap'))crmGo('/pages/task.html?id=' + '${t.id}', '${(t.name || '').replace(/'/g, '')}')">
                         <div style="display:flex;justify-content:space-between;align-items:start;gap:6px;">
                             <div class="task-title-row" style="flex:1;">
                                 ${renderPriorityMark(t.priority)}

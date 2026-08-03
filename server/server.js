@@ -5,6 +5,10 @@ const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const db = require('./database');
+const { hashPassword, verifyPassword, isHashed } = require('./auth-passwords');
+const vault = require('./vault');
+const deployOps = require('./deploy-ops');
+const appVersion = require('./app-version');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
@@ -66,6 +70,33 @@ function logActivity(projectId, taskId, userName, action, details = '') {
   }
 }
 
+function userNotifPrefsByName(userName) {
+  const u = db.prepare('SELECT * FROM users WHERE name = ? OR username = ?').get(userName, userName);
+  if (!u) {
+    return { reminders: true, deadlines: true, deadline_week: true, deadline_day: true, overdue: true };
+  }
+  const deadlines = u.notif_deadlines !== 0;
+  return {
+    reminders: u.notif_reminders !== 0,
+    deadlines,
+    deadline_week: u.notif_deadline_week === undefined || u.notif_deadline_week === null
+      ? deadlines : u.notif_deadline_week !== 0,
+    deadline_day: u.notif_deadline_day === undefined || u.notif_deadline_day === null
+      ? deadlines : u.notif_deadline_day !== 0,
+    overdue: u.notif_overdue !== 0
+  };
+}
+
+function userAllowsNotif(userName, kind) {
+  const p = userNotifPrefsByName(userName);
+  if (kind === 'reminders') return p.reminders;
+  if (kind === 'deadlines') return p.deadlines;
+  if (kind === 'deadline_week') return p.deadline_week;
+  if (kind === 'deadline_day') return p.deadline_day;
+  if (kind === 'overdue') return p.overdue;
+  return true;
+}
+
 // Create a notification for a user (skipped when the user changed their own task)
 function notifyUser(userName, actor, action, message, taskId = null, projectId = null) {
   try {
@@ -74,6 +105,233 @@ function notifyUser(userName, actor, action, message, taskId = null, projectId =
       .run(userName, actor, action, message, taskId, projectId);
   } catch (err) {
     console.error('Failed to create notification:', err);
+  }
+}
+
+function notifyAllUsers(actor, action, message, projectId = null, kind = null) {
+  try {
+    const users = db.prepare('SELECT name FROM users').all();
+    const ins = db.prepare(
+      'INSERT INTO notifications (user_name, actor, action, message, task_id, project_id) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    users.forEach(u => {
+      if (!u.name) return;
+      if (kind && !userAllowsNotif(u.name, kind)) return;
+      ins.run(u.name, actor || 'Система', action, message, null, projectId);
+    });
+  } catch (err) {
+    console.error('Failed to notify all users:', err);
+  }
+}
+
+function addDaysISO(dateStr, days) {
+  if (!dateStr) return '';
+  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+  if (Number.isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function addMonthsISO(dateStr, months) {
+  if (!dateStr) return '';
+  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+  if (Number.isNaN(d.getTime())) return '';
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Normalize recur_interval: day|week|month|year|every:N:unit */
+function normalizeRecurInterval(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'day' || s === 'week' || s === 'month' || s === 'year') return s;
+  const m = s.match(/^every:(\d+):(day|week|month|year)$/);
+  if (m) {
+    const n = Math.max(1, parseInt(m[1], 10) || 1);
+    return `every:${n}:${m[2]}`;
+  }
+  return 'month';
+}
+
+function computeNextExpenseDate(fromDate, interval) {
+  const base = String(fromDate || '').slice(0, 10);
+  if (!base) return '';
+  const iv = normalizeRecurInterval(interval);
+  if (iv === 'day') return addDaysISO(base, 1);
+  if (iv === 'week') return addDaysISO(base, 7);
+  if (iv === 'year') return addMonthsISO(base, 12);
+  if (iv === 'month') return addMonthsISO(base, 1);
+  const m = iv.match(/^every:(\d+):(day|week|month|year)$/);
+  if (m) {
+    const n = parseInt(m[1], 10) || 1;
+    const unit = m[2];
+    if (unit === 'day') return addDaysISO(base, n);
+    if (unit === 'week') return addDaysISO(base, n * 7);
+    if (unit === 'year') return addMonthsISO(base, n * 12);
+    return addMonthsISO(base, n);
+  }
+  return addMonthsISO(base, 1);
+}
+
+/** Keep reminder rows for recurring expenses (remind 3 days before next_date). */
+function syncExpenseReminders() {
+  try {
+    const recurring = db.prepare('SELECT * FROM expenses WHERE is_recurring = 1').all();
+    const del = db.prepare(
+      "DELETE FROM reminders WHERE expense_id = ? AND type = 'expense' AND is_sent = 0"
+    );
+    const ins = db.prepare(
+      "INSERT INTO reminders (project_id, type, message, remind_date, expense_id, notified) VALUES (NULL, 'expense', ?, ?, ?, 0)"
+    );
+    for (const e of recurring) {
+      let next = (e.next_date || e.date || '').slice(0, 10);
+      if (!next) continue;
+      const today = new Date().toISOString().slice(0, 10);
+      // If next_date already passed, roll forward
+      let guard = 0;
+      while (next < today && guard < 36) {
+        next = computeNextExpenseDate(next, e.recur_interval || 'month');
+        guard++;
+      }
+      if (next !== (e.next_date || '').slice(0, 10)) {
+        db.prepare('UPDATE expenses SET next_date = ? WHERE id = ?').run(next, e.id);
+      }
+      const remindDate = addDaysISO(next, -3);
+      del.run(e.id);
+      if (!remindDate) continue;
+      const label = [e.category, e.subcategory, e.description].filter(Boolean).join(' · ');
+      const msg = `Повторяющийся расход: ${label} — ${e.amount}₽. Списание: ${next}`;
+      ins.run(msg, remindDate, e.id);
+    }
+  } catch (err) {
+    console.error('syncExpenseReminders failed:', err);
+  }
+}
+
+/** Push in-app notifications once when expense reminder becomes due. */
+function fireDueExpenseReminderNotifications() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const due = db.prepare(`
+      SELECT * FROM reminders
+      WHERE type = 'expense' AND is_sent = 0 AND notified = 0 AND remind_date <= ?
+    `).all(today);
+    const mark = db.prepare('UPDATE reminders SET notified = 1 WHERE id = ?');
+    due.forEach(r => {
+      notifyAllUsers('Система', 'expense_reminder', r.message, null, 'reminders');
+      mark.run(r.id);
+    });
+  } catch (err) {
+    console.error('fireDueExpenseReminderNotifications failed:', err);
+  }
+}
+
+function todayLocalISO() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function parseDeadlineISO(raw) {
+  if (raw == null) return '';
+  const s = String(raw).trim();
+  if (!s || s === '—' || s === '-' || s === 'null') return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+  return '';
+}
+
+function deadlineNotifExists(userName, action, taskId, projectId, deadlineISO) {
+  const row = db.prepare(`
+    SELECT id FROM notifications
+    WHERE user_name = ? AND action = ?
+      AND IFNULL(task_id, '') = IFNULL(?, '')
+      AND IFNULL(project_id, '') = IFNULL(?, '')
+      AND message LIKE ?
+    LIMIT 1
+  `).get(userName, action, taskId || null, projectId || null, '%' + deadlineISO + '%');
+  return !!row;
+}
+
+function notifyDeadline(userName, action, message, taskId, projectId, deadlineISO, kind = 'deadlines') {
+  if (!userName) return;
+  if (!userAllowsNotif(userName, kind)) return;
+  if (deadlineNotifExists(userName, action, taskId, projectId, deadlineISO)) return;
+  try {
+    db.prepare(
+      'INSERT INTO notifications (user_name, actor, action, message, task_id, project_id) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(userName, 'Система', action, message, taskId || null, projectId || null);
+  } catch (err) {
+    console.error('notifyDeadline failed:', err);
+  }
+}
+
+/** Technical deadline warnings: 7 days and 1 day before task/project deadline. */
+function fireDeadlineNotifications() {
+  try {
+    const today = todayLocalISO();
+    const in1 = addDaysISO(today, 1);
+    const in7 = addDaysISO(today, 7);
+
+    const tasks = db.prepare(
+      "SELECT id, name, person, date, date_end, done FROM tasks WHERE IFNULL(done, 0) = 0"
+    ).all();
+    for (const t of tasks) {
+      const dl = parseDeadlineISO(t.date_end) || parseDeadlineISO(t.date);
+      if (!dl || !t.person) continue;
+      if (dl === in7) {
+        notifyDeadline(
+          t.person, 'deadline_week',
+          `До дедлайна задачи «${t.name}» осталась неделя (${dl})`,
+          t.id, null, dl, 'deadline_week'
+        );
+      }
+      if (dl === in1) {
+        notifyDeadline(
+          t.person, 'deadline_day',
+          `До дедлайна задачи «${t.name}» остался 1 день (${dl})`,
+          t.id, null, dl, 'deadline_day'
+        );
+      }
+      if (dl < today) {
+        notifyDeadline(
+          t.person, 'deadline_overdue',
+          `Задача «${t.name}» просрочена (дедлайн ${dl})`,
+          t.id, null, dl, 'overdue'
+        );
+      }
+    }
+
+    const projects = db.prepare(
+      "SELECT id, name, deadline, assignee, status FROM projects"
+    ).all();
+    for (const p of projects) {
+      if (p.status === 'Выполнено') continue;
+      const dl = parseDeadlineISO(p.deadline);
+      if (!dl || !p.assignee) continue;
+      if (dl === in7) {
+        notifyDeadline(
+          p.assignee, 'deadline_week',
+          `До дедлайна проекта «${p.name}» осталась неделя (${dl})`,
+          null, p.id, dl, 'deadline_week'
+        );
+      }
+      if (dl === in1) {
+        notifyDeadline(
+          p.assignee, 'deadline_day',
+          `До дедлайна проекта «${p.name}» остался 1 день (${dl})`,
+          null, p.id, dl, 'deadline_day'
+        );
+      }
+      if (dl < today) {
+        notifyDeadline(
+          p.assignee, 'deadline_overdue',
+          `Проект «${p.name}» просрочен (дедлайн ${dl})`,
+          null, p.id, dl, 'overdue'
+        );
+      }
+    }
+  } catch (err) {
+    console.error('fireDeadlineNotifications failed:', err);
   }
 }
 
@@ -136,23 +394,47 @@ function uploadSingle(field) {
 
 // ==================== AUTH API ====================
 
+function publicUser(u) {
+  if (!u) return null;
+  const deadlinesOn = u.notif_deadlines !== 0;
+  return {
+    id: u.id,
+    username: u.username,
+    name: u.name,
+    role: u.role,
+    avatar: u.avatar,
+    notif_reminders: u.notif_reminders !== 0,
+    notif_deadlines: deadlinesOn,
+    notif_deadline_week: u.notif_deadline_week === undefined || u.notif_deadline_week === null
+      ? deadlinesOn : u.notif_deadline_week !== 0,
+    notif_deadline_day: u.notif_deadline_day === undefined || u.notif_deadline_day === null
+      ? deadlinesOn : u.notif_deadline_day !== 0,
+    notif_overdue: u.notif_overdue !== 0
+  };
+}
+
 app.post('/api/login', (req, res) => {
   const { username, password, remember } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?').get(username, password);
-  if (!user) return res.status(401).json({ error: 'Неверный логин или пароль' });
-  
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  if (!user || !verifyPassword(password, user.password)) {
+    return res.status(401).json({ error: 'Неверный логин или пароль' });
+  }
+  // Upgrade leftover plaintext hashes
+  if (!isHashed(user.password)) {
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(password), user.id);
+  }
+
   const token = generateToken();
-  // Token valid for 30 days if remember me, otherwise 24 hours
   const days = remember ? 30 : 1;
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-  
+
   db.prepare('INSERT INTO sessions (token, user_id, username, name, role, avatar, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
     token, user.id, user.username, user.name, user.role, user.avatar, expiresAt
   );
-  
-  res.json({ 
-    token, 
-    user: { id: user.id, username: user.username, name: user.name, role: user.role, avatar: user.avatar },
+
+  res.json({
+    token,
+    user: publicUser(user),
     expires_at: expiresAt
   });
 });
@@ -177,11 +459,72 @@ app.post('/api/users', requireAuth, (req, res) => {
     const userRole = (role === 'admin' || role === 'manager') ? role : 'manager';
     const avatar = makeAvatar(name);
     const result = db.prepare('INSERT INTO users (username, password, name, role, avatar) VALUES (?, ?, ?, ?, ?)')
-      .run(username.trim(), password, name.trim(), userRole, avatar);
+      .run(username.trim(), hashPassword(password), name.trim(), userRole, avatar);
     const user = db.prepare('SELECT id, username, name, role, avatar, created_at FROM users WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(user);
   } catch (err) {
     if (String(err.message).includes('UNIQUE')) return res.status(400).json({ error: 'Такой логин уже существует' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Update own profile: name, username, notification prefs */
+app.put('/api/users/me', requireAuth, (req, res) => {
+  try {
+    const me = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!me) return res.status(404).json({ error: 'Пользователь не найден' });
+    const name = req.body.name != null ? String(req.body.name).trim() : me.name;
+    let username = req.body.username != null ? String(req.body.username).trim() : me.username;
+    if (!name) return res.status(400).json({ error: 'Введите имя' });
+    if (!username) return res.status(400).json({ error: 'Введите логин' });
+    const avatar = makeAvatar(name);
+    const nr = req.body.notif_reminders === undefined ? me.notif_reminders : (req.body.notif_reminders ? 1 : 0);
+    const nw = req.body.notif_deadline_week === undefined ? me.notif_deadline_week : (req.body.notif_deadline_week ? 1 : 0);
+    const nday = req.body.notif_deadline_day === undefined ? me.notif_deadline_day : (req.body.notif_deadline_day ? 1 : 0);
+    const no = req.body.notif_overdue === undefined ? me.notif_overdue : (req.body.notif_overdue ? 1 : 0);
+    const nd = req.body.notif_deadlines === undefined
+      ? ((nw || nday) ? 1 : 0)
+      : (req.body.notif_deadlines ? 1 : 0);
+    try {
+      db.prepare(`
+        UPDATE users SET name=?, username=?, avatar=?, notif_reminders=?, notif_deadlines=?,
+          notif_deadline_week=?, notif_deadline_day=?, notif_overdue=?
+        WHERE id=?
+      `).run(name, username, avatar, nr, nd, nw, nday, no, me.id);
+    } catch (err) {
+      if (String(err.message).includes('UNIQUE')) return res.status(400).json({ error: 'Такой логин уже существует' });
+      throw err;
+    }
+    // Keep sessions in sync
+    db.prepare('UPDATE sessions SET username=?, name=?, avatar=? WHERE user_id=?')
+      .run(username, name, avatar, me.id);
+    // Rename soft-links in notifications / reminders for_user
+    if (name !== me.name) {
+      try {
+        db.prepare('UPDATE notifications SET user_name=? WHERE user_name=?').run(name, me.name);
+        db.prepare("UPDATE reminders SET for_user=? WHERE for_user=?").run(name, me.name);
+        db.prepare("UPDATE reminders SET created_by=? WHERE created_by=?").run(name, me.name);
+      } catch (e) {}
+    }
+    const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(me.id);
+    res.json(publicUser(updated));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/users/me/password', requireAuth, (req, res) => {
+  try {
+    const { current_password, new_password } = req.body || {};
+    if (!current_password || !new_password) return res.status(400).json({ error: 'Заполните пароли' });
+    if (String(new_password).length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+    const me = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!me || !verifyPassword(current_password, me.password)) {
+      return res.status(400).json({ error: 'Неверный текущий пароль' });
+    }
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(new_password), me.id);
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -286,7 +629,8 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ user: req.user });
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({ user: publicUser(row) || req.user });
 });
 
 // ==================== PROJECTS API ====================
@@ -753,12 +1097,26 @@ app.delete('/api/calendar-statuses/:id', requireAuth, (req, res) => {
   }
 });
 
-// ==================== SUBTASKS API ====================
+// ==================== SUBTASKS API (compat → tasks.parent_id) ====================
+
+function taskAsSubtask(t) {
+  return {
+    id: t.id,
+    task_id: t.parent_id,
+    name: t.name,
+    person: t.person || '',
+    deadline: t.date_end || t.date || '',
+    done: !!t.done,
+    created_at: t.created_at
+  };
+}
 
 app.get('/api/tasks/:taskId/subtasks', requireAuth, (req, res) => {
   try {
-    const subtasks = db.prepare('SELECT * FROM subtasks WHERE task_id = ? ORDER BY created_at').all(req.params.taskId);
-    res.json(subtasks.map(s => ({ ...s, done: !!s.done })));
+    const rows = db.prepare(
+      'SELECT * FROM tasks WHERE parent_id = ? ORDER BY created_at ASC'
+    ).all(req.params.taskId);
+    res.json(rows.map(taskAsSubtask));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -767,12 +1125,30 @@ app.get('/api/tasks/:taskId/subtasks', requireAuth, (req, res) => {
 app.post('/api/subtasks', requireAuth, (req, res) => {
   try {
     const { task_id, name, person, deadline } = req.body;
-    const subtaskId = 'sub_' + Date.now();
-    
-    db.prepare('INSERT INTO subtasks (id, task_id, name, person, deadline) VALUES (?, ?, ?, ?, ?)').run(subtaskId, task_id, name, person || '', deadline || '');
-    
-    const subtask = db.prepare('SELECT * FROM subtasks WHERE id = ?').get(subtaskId);
-    res.status(201).json({ ...subtask, done: !!subtask.done });
+    if (!task_id || !name) return res.status(400).json({ error: 'Нужны task_id и name' });
+    const parent = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task_id);
+    if (!parent) return res.status(404).json({ error: 'Родительская задача не найдена' });
+    const id = 'task_' + Date.now();
+    const creator = (req.user && req.user.name) || '';
+    db.prepare(`
+      INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, created_by, updated_by)
+      VALUES (?, ?, ?, ?, ?, '', ?, '', 0, 0, '[]', ?, '', '', 0, ?, ?)
+    `).run(
+      id,
+      parent.project_id || '',
+      String(name).trim(),
+      parent.column_status || 'Ожидает',
+      person || '',
+      deadline || '',
+      task_id,
+      creator,
+      creator
+    );
+    try {
+      db.prepare('UPDATE tasks SET is_epic = 1 WHERE id = ? AND (parent_id IS NULL OR parent_id = "")').run(task_id);
+    } catch (e) {}
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    res.status(201).json(taskAsSubtask(row));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -780,10 +1156,16 @@ app.post('/api/subtasks', requireAuth, (req, res) => {
 
 app.put('/api/subtasks/:id', requireAuth, (req, res) => {
   try {
-    const { name, done, person, deadline } = req.body;
-    db.prepare('UPDATE subtasks SET name=?, done=?, person=?, deadline=? WHERE id=?').run(name, done ? 1 : 0, person || '', deadline || '', req.params.id);
-    const subtask = db.prepare('SELECT * FROM subtasks WHERE id = ?').get(req.params.id);
-    res.json({ ...subtask, done: !!subtask.done });
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!row || !row.parent_id) return res.status(404).json({ error: 'Подзадача не найдена' });
+    const name = req.body.name != null ? req.body.name : row.name;
+    const done = req.body.done !== undefined ? (req.body.done ? 1 : 0) : row.done;
+    const person = req.body.person !== undefined ? (req.body.person || '') : (row.person || '');
+    const deadline = req.body.deadline !== undefined ? (req.body.deadline || '') : (row.date_end || '');
+    db.prepare('UPDATE tasks SET name=?, done=?, person=?, date_end=? WHERE id=?')
+      .run(name, done, person, deadline, req.params.id);
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    res.json(taskAsSubtask(updated));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -791,7 +1173,9 @@ app.put('/api/subtasks/:id', requireAuth, (req, res) => {
 
 app.delete('/api/subtasks/:id', requireAuth, (req, res) => {
   try {
-    db.prepare('DELETE FROM subtasks WHERE id = ?').run(req.params.id);
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Подзадача не найдена' });
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1104,24 +1488,45 @@ app.delete('/api/wiki-pages/:id', requireAuth, (req, res) => {
   }
 });
 
-// ==================== DOCUMENTS API ====================
+// ==================== DOCUMENTS API (compat → wiki_pages) ====================
+
+function wikiAsDocument(w) {
+  let doc_category = 'client';
+  let template_category = 'Другое';
+  if (w.kind === 'template') { doc_category = 'template'; template_category = 'Шаблон'; }
+  if (w.kind === 'prompt') { doc_category = 'template'; template_category = 'Промпт'; }
+  return {
+    id: w.id,
+    project_id: w.project_id,
+    name: w.title,
+    type: w.file_type || (w.kind === 'page' ? 'PAGE' : 'FILE'),
+    size: w.file_size || '',
+    file_path: w.file_path || '',
+    doc_category,
+    template_category,
+    created_at: w.created_at,
+    project_name: w.project_name,
+    project_client: w.project_client
+  };
+}
 
 app.get('/api/documents', requireAuth, (req, res) => {
   try {
     const { project_id, category } = req.query;
-    let docs;
+    let rows = db.prepare(`
+      SELECT w.*, p.name as project_name, p.client as project_client
+      FROM wiki_pages w
+      LEFT JOIN projects p ON w.project_id = p.id
+      ORDER BY w.created_at DESC
+    `).all();
     if (project_id) {
-      docs = db.prepare('SELECT * FROM documents WHERE project_id = ? ORDER BY created_at DESC').all(project_id);
+      rows = rows.filter(r => String(r.project_id || '') === String(project_id));
+    } else if (category === 'template') {
+      rows = rows.filter(r => r.kind === 'template' || r.kind === 'prompt');
     } else if (category) {
-      if (category === 'template') {
-        docs = db.prepare("SELECT * FROM documents WHERE doc_category = 'template' ORDER BY created_at DESC").all();
-      } else {
-        docs = db.prepare("SELECT d.*, p.name as project_name, p.client as project_client FROM documents d JOIN projects p ON d.project_id = p.id WHERE d.doc_category = 'client' OR d.doc_category IS NULL ORDER BY d.created_at DESC").all();
-      }
-    } else {
-      docs = db.prepare('SELECT d.*, p.name as project_name, p.client as project_client FROM documents d JOIN projects p ON d.project_id = p.id ORDER BY d.created_at DESC').all();
+      rows = rows.filter(r => r.kind !== 'template' && r.kind !== 'prompt' && r.project_id);
     }
-    res.json(docs);
+    res.json(rows.map(wikiAsDocument));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1131,11 +1536,24 @@ app.post('/api/documents', requireAuth, (req, res) => {
   try {
     const { project_id, name, type, size, doc_category, template_category } = req.body;
     const category = doc_category || 'client';
-    const projId = category === 'template' ? null : project_id;
-    const tplCat = template_category || 'Другое';
-    db.prepare('INSERT INTO documents (project_id, name, type, size, doc_category, template_category) VALUES (?, ?, ?, ?, ?, ?)').run(projId, name, type, size || '', category, tplCat);
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(db.prepare('SELECT last_insert_rowid() as id').get().id);
-    res.status(201).json(doc);
+    let kind = 'file';
+    if (category === 'template') {
+      const tc = String(template_category || '').toLowerCase();
+      kind = (tc.includes('промпт') || tc.includes('prompt')) ? 'prompt' : 'template';
+    }
+    const projId = kind === 'template' || kind === 'prompt' ? null : (project_id || null);
+    const user = req.user?.name || '';
+    const max = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM wiki_pages WHERE parent_id IS NULL').get();
+    const info = db.prepare(`INSERT INTO wiki_pages
+      (parent_id, title, content, kind, project_id, file_path, file_type, file_size, sort_order, created_by, updated_by)
+      VALUES (NULL, ?, '', ?, ?, '', ?, ?, ?, ?, ?)`).run(
+      name || 'Без названия', kind, projId, type || '', size || '', (max?.m ?? -1) + 1, user, user
+    );
+    const row = db.prepare(`
+      SELECT w.*, p.name as project_name, p.client as project_client
+      FROM wiki_pages w LEFT JOIN projects p ON w.project_id = p.id WHERE w.id = ?
+    `).get(info.lastInsertRowid);
+    res.status(201).json(wikiAsDocument(row));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1143,7 +1561,9 @@ app.post('/api/documents', requireAuth, (req, res) => {
 
 app.delete('/api/documents/:id', requireAuth, (req, res) => {
   try {
-    db.prepare('DELETE FROM documents WHERE id = ?').run(req.params.id);
+    const row = db.prepare('SELECT * FROM wiki_pages WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Документ не найден' });
+    db.prepare('DELETE FROM wiki_pages WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1152,14 +1572,30 @@ app.delete('/api/documents/:id', requireAuth, (req, res) => {
 
 app.post('/api/documents/upload', requireAuth, uploadSingle('file'), (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
     const { project_id, name, type, size, doc_category, template_category } = req.body;
     const category = doc_category || 'client';
-    const projId = category === 'template' ? null : project_id;
-    const tplCat = template_category || 'Другое';
-    const file_path = req.file ? req.file.filename : null;
-    db.prepare('INSERT INTO documents (project_id, name, type, size, file_path, doc_category, template_category) VALUES (?, ?, ?, ?, ?, ?, ?)').run(projId, name, type, size || '', file_path, category, tplCat);
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(db.prepare('SELECT last_insert_rowid() as id').get().id);
-    res.status(201).json(doc);
+    let kind = 'file';
+    if (category === 'template') {
+      const tc = String(template_category || '').toLowerCase();
+      kind = (tc.includes('промпт') || tc.includes('prompt')) ? 'prompt' : 'template';
+    }
+    const projId = kind === 'template' || kind === 'prompt' ? null : (project_id || null);
+    const user = req.user?.name || '';
+    const ext = path.extname(req.file.originalname || '').replace('.', '').toUpperCase();
+    const max = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM wiki_pages WHERE parent_id IS NULL').get();
+    const info = db.prepare(`INSERT INTO wiki_pages
+      (parent_id, title, content, kind, project_id, file_path, file_type, file_size, sort_order, created_by, updated_by)
+      VALUES (NULL, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      (name || req.file.originalname || 'Файл').trim(),
+      kind, projId, req.file.filename, type || ext || 'FILE', size || '',
+      (max?.m ?? -1) + 1, user, user
+    );
+    const row = db.prepare(`
+      SELECT w.*, p.name as project_name, p.client as project_client
+      FROM wiki_pages w LEFT JOIN projects p ON w.project_id = p.id WHERE w.id = ?
+    `).get(info.lastInsertRowid);
+    res.status(201).json(wikiAsDocument(row));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1304,6 +1740,7 @@ app.delete('/api/salaries/:id', requireAuth, (req, res) => {
 
 app.get('/api/expenses', requireAuth, (req, res) => {
   try {
+    syncExpenseReminders();
     const { category, month } = req.query;
     let expenses;
     if (category) {
@@ -1313,7 +1750,10 @@ app.get('/api/expenses', requireAuth, (req, res) => {
     } else {
       expenses = db.prepare('SELECT * FROM expenses ORDER BY date DESC, created_at DESC').all();
     }
-    res.json(expenses);
+    res.json(expenses.map(e => ({
+      ...e,
+      is_recurring: !!e.is_recurring
+    })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1321,11 +1761,35 @@ app.get('/api/expenses', requireAuth, (req, res) => {
 
 app.post('/api/expenses', requireAuth, (req, res) => {
   try {
-    const { category, description, amount, date, person, project_id, note } = req.body;
-    db.prepare('INSERT INTO expenses (category, description, amount, date, person, project_id, note) VALUES (?, ?, ?, ?, ?, ?, ?)').run(category, description, amount, date, person || '', project_id || null, note || '');
+    const {
+      category, description, amount, date, person, project_id, note,
+      subcategory, explanation, is_recurring, recur_interval, next_date
+    } = req.body;
+    if (!category || amount == null || !date) {
+      return res.status(400).json({ error: 'Категория, сумма и дата обязательны' });
+    }
+    if (category === 'Возврат' && !project_id) {
+      return res.status(400).json({ error: 'Для возврата выберите проект' });
+    }
+    const desc = (description || '').trim() || category;
+    const recurring = is_recurring ? 1 : 0;
+    const interval = normalizeRecurInterval(recur_interval);
+    let next = (next_date || '').slice(0, 10);
+    if (recurring) {
+      next = next || computeNextExpenseDate(date, interval);
+    } else {
+      next = '';
+    }
+    db.prepare(`INSERT INTO expenses
+      (category, description, amount, date, person, project_id, note, subcategory, explanation, is_recurring, recur_interval, next_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      category, desc, amount, date, person || '', project_id || null, note || '',
+      subcategory || '', explanation || '', recurring, interval, next
+    );
     const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(db.prepare('SELECT last_insert_rowid() as id').get().id);
-    logActivity(project_id || null, null, req.user.name, 'add_expense', `${category}: ${description} - ${amount}₽`);
-    res.status(201).json(expense);
+    if (recurring) syncExpenseReminders();
+    logActivity(project_id || null, null, req.user.name, 'add_expense', `${category}: ${desc} - ${amount}₽`);
+    res.status(201).json({ ...expense, is_recurring: !!expense.is_recurring });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1333,10 +1797,49 @@ app.post('/api/expenses', requireAuth, (req, res) => {
 
 app.put('/api/expenses/:id', requireAuth, (req, res) => {
   try {
-    const { category, description, amount, date, person, project_id, note } = req.body;
-    db.prepare('UPDATE expenses SET category=?, description=?, amount=?, date=?, person=?, project_id=?, note=? WHERE id=?').run(category, description, amount, date, person || '', project_id || null, note || '', req.params.id);
+    const old = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Не найдено' });
+    const {
+      category, description, amount, date, person, project_id, note,
+      subcategory, explanation, is_recurring, recur_interval, next_date
+    } = req.body;
+    const cat = category !== undefined ? category : old.category;
+    const proj = project_id !== undefined ? (project_id || null) : old.project_id;
+    if (cat === 'Возврат' && !proj) {
+      return res.status(400).json({ error: 'Для возврата выберите проект' });
+    }
+    const recurring = is_recurring !== undefined ? (is_recurring ? 1 : 0) : (old.is_recurring ? 1 : 0);
+    const interval = recur_interval !== undefined
+      ? normalizeRecurInterval(recur_interval)
+      : normalizeRecurInterval(old.recur_interval || 'month');
+    const baseDate = date !== undefined ? date : old.date;
+    let next = next_date !== undefined ? (next_date || '') : (old.next_date || '');
+    if (recurring) {
+      next = next || computeNextExpenseDate(baseDate, interval);
+    } else {
+      next = '';
+    }
+    db.prepare(`UPDATE expenses SET
+      category=?, description=?, amount=?, date=?, person=?, project_id=?, note=?,
+      subcategory=?, explanation=?, is_recurring=?, recur_interval=?, next_date=?
+      WHERE id=?`).run(
+      cat,
+      description !== undefined ? description : old.description,
+      amount !== undefined ? amount : old.amount,
+      baseDate,
+      person !== undefined ? (person || '') : old.person,
+      proj,
+      note !== undefined ? (note || '') : old.note,
+      subcategory !== undefined ? (subcategory || '') : (old.subcategory || ''),
+      explanation !== undefined ? (explanation || '') : (old.explanation || ''),
+      recurring,
+      interval,
+      next,
+      req.params.id
+    );
+    syncExpenseReminders();
     const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
-    res.json(expense);
+    res.json({ ...expense, is_recurring: !!expense.is_recurring });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1344,6 +1847,7 @@ app.put('/api/expenses/:id', requireAuth, (req, res) => {
 
 app.delete('/api/expenses/:id', requireAuth, (req, res) => {
   try {
+    db.prepare("DELETE FROM reminders WHERE expense_id = ? AND type = 'expense'").run(req.params.id);
     db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err) {
@@ -1360,8 +1864,13 @@ app.get('/api/expenses/stats', requireAuth, (req, res) => {
     } else {
       stats = db.prepare("SELECT category, SUM(amount) as total FROM expenses GROUP BY category ORDER BY total DESC").all();
     }
-    const total = stats.reduce((sum, s) => sum + s.total, 0);
-    res.json({ categories: stats, total });
+    const refundTotal = stats
+      .filter(s => s.category === 'Возврат')
+      .reduce((sum, s) => sum + (s.total || 0), 0);
+    const total = stats
+      .filter(s => s.category !== 'Возврат')
+      .reduce((sum, s) => sum + (s.total || 0), 0);
+    res.json({ categories: stats, total, refund_total: refundTotal });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1371,26 +1880,100 @@ app.get('/api/expenses/stats', requireAuth, (req, res) => {
 
 app.get('/api/reminders', requireAuth, (req, res) => {
   try {
-    const { active } = req.query;
+    syncExpenseReminders();
+    fireDueExpenseReminderNotifications();
+    fireDeadlineNotifications();
+    const { active, date } = req.query;
+    const me = req.user.name || '';
+    // Note reminders: for me, or legacy without for_user
+    const noteForMe = `(r.type != 'note' OR r.for_user IS NULL OR r.for_user = '' OR r.for_user = ?)`;
     let reminders;
-    if (active === 'true') {
+    if (date) {
+      const day = String(date).slice(0, 10);
+      // Exact date, plus legacy undated notes on "today"
+      const todayLocal = (() => {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      })();
+      reminders = db.prepare(`
+        SELECT r.*,
+          p.name as project_name, p.client as project_client, p.amount as project_amount, p.payment_due_date,
+          e.description as expense_description, e.amount as expense_amount, e.category as expense_category,
+          e.next_date as expense_next_date, e.subcategory as expense_subcategory
+        FROM reminders r
+        LEFT JOIN projects p ON r.project_id IS NOT NULL AND r.project_id != '' AND r.project_id = p.id
+        LEFT JOIN expenses e ON r.expense_id = e.id
+        WHERE r.is_sent = 0 AND r.type = 'note'
+          AND (
+            r.remind_date = ?
+            OR ((r.remind_date IS NULL OR r.remind_date = '') AND ? = ?)
+          )
+          AND (r.for_user IS NULL OR r.for_user = '' OR r.for_user = ?)
+        ORDER BY r.created_at DESC
+      `).all(day, day, todayLocal, me);
+    } else if (active === 'true') {
       const today = new Date().toISOString().split('T')[0];
       reminders = db.prepare(`
-        SELECT r.*, p.name as project_name, p.client as project_client, p.amount as project_amount, p.payment_due_date
-        FROM reminders r 
-        JOIN projects p ON r.project_id = p.id 
-        WHERE r.remind_date <= ? AND r.is_sent = 0
-        ORDER BY r.remind_date ASC
-      `).all(today);
+        SELECT r.*,
+          p.name as project_name, p.client as project_client, p.amount as project_amount, p.payment_due_date,
+          e.description as expense_description, e.amount as expense_amount, e.category as expense_category,
+          e.next_date as expense_next_date, e.subcategory as expense_subcategory
+        FROM reminders r
+        LEFT JOIN projects p ON r.project_id IS NOT NULL AND r.project_id != '' AND r.project_id = p.id
+        LEFT JOIN expenses e ON r.expense_id = e.id
+        WHERE r.is_sent = 0 AND (
+          (r.type = 'note' AND (r.remind_date IS NULL OR r.remind_date = '' OR r.remind_date <= ?)
+            AND (r.for_user IS NULL OR r.for_user = '' OR r.for_user = ?))
+          OR (r.type != 'note' AND r.remind_date <= ? AND (r.type != 'payment' OR p.id IS NOT NULL))
+        )
+        ORDER BY CASE WHEN r.remind_date IS NULL OR r.remind_date = '' THEN 1 ELSE 0 END, r.remind_date ASC
+      `).all(today, me, today);
     } else {
       reminders = db.prepare(`
-        SELECT r.*, p.name as project_name, p.client as project_client, p.amount as project_amount, p.payment_due_date
-        FROM reminders r 
-        JOIN projects p ON r.project_id = p.id 
+        SELECT r.*,
+          p.name as project_name, p.client as project_client, p.amount as project_amount, p.payment_due_date,
+          e.description as expense_description, e.amount as expense_amount, e.category as expense_category,
+          e.next_date as expense_next_date, e.subcategory as expense_subcategory
+        FROM reminders r
+        LEFT JOIN projects p ON r.project_id IS NOT NULL AND r.project_id != '' AND r.project_id = p.id
+        LEFT JOIN expenses e ON r.expense_id = e.id
+        WHERE ${noteForMe}
         ORDER BY r.remind_date DESC
-      `).all();
+      `).all(me);
     }
-    res.json(reminders.map(r => ({ ...r, is_sent: !!r.is_sent })));
+    res.json(reminders.map(r => ({ ...r, is_sent: !!r.is_sent, notified: !!r.notified })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reminders', requireAuth, (req, res) => {
+  try {
+    const message = String(req.body.message || '').trim();
+    if (!message || !message.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()) {
+      return res.status(400).json({ error: 'Введите текст напоминания' });
+    }
+    if (message.length > 50000) return res.status(400).json({ error: 'Текст слишком длинный' });
+    let remind_date = req.body.remind_date;
+    if (remind_date == null) remind_date = '';
+    remind_date = String(remind_date).trim().slice(0, 10);
+    if (remind_date && !/^\d{4}-\d{2}-\d{2}$/.test(remind_date)) {
+      return res.status(400).json({ error: 'Некорректная дата' });
+    }
+    // Empty date → today, so it appears on calendar day page too
+    if (!remind_date) {
+      const d = new Date();
+      remind_date = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    let for_user = String(req.body.for_user || '').trim();
+    if (!for_user) for_user = req.user.name || '';
+    db.prepare(`
+      INSERT INTO reminders (project_id, type, message, remind_date, expense_id, notified, is_sent, created_by, for_user)
+      VALUES (NULL, 'note', ?, ?, NULL, 0, 0, ?, ?)
+    `).run(message, remind_date, req.user.name || '', for_user);
+    const id = db.prepare('SELECT last_insert_rowid() as id').get().id;
+    const row = db.prepare('SELECT * FROM reminders WHERE id = ?').get(id);
+    res.status(201).json({ ...row, is_sent: !!row.is_sent, notified: !!row.notified });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1398,7 +1981,17 @@ app.get('/api/reminders', requireAuth, (req, res) => {
 
 app.put('/api/reminders/:id/sent', requireAuth, (req, res) => {
   try {
+    const rem = db.prepare('SELECT * FROM reminders WHERE id = ?').get(req.params.id);
     db.prepare('UPDATE reminders SET is_sent = 1 WHERE id = ?').run(req.params.id);
+    // After dismissing a recurring expense reminder, roll next_date forward
+    if (rem && rem.type === 'expense' && rem.expense_id) {
+      const exp = db.prepare('SELECT * FROM expenses WHERE id = ?').get(rem.expense_id);
+      if (exp && exp.is_recurring) {
+        const next = computeNextExpenseDate(exp.next_date || exp.date, exp.recur_interval || 'month');
+        db.prepare('UPDATE expenses SET next_date = ? WHERE id = ?').run(next, exp.id);
+        syncExpenseReminders();
+      }
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1418,12 +2011,35 @@ app.delete('/api/reminders/:id', requireAuth, (req, res) => {
 
 app.get('/api/notifications', requireAuth, (req, res) => {
   try {
+    fireDeadlineNotifications();
     const limit = Math.min(parseInt(req.query.limit) || 10, 50);
     const offset = parseInt(req.query.offset) || 0;
-    const items = db.prepare('SELECT * FROM notifications WHERE user_name = ? ORDER BY id DESC LIMIT ? OFFSET ?').all(req.user.name, limit, offset);
-    const unread = db.prepare('SELECT COUNT(*) as c FROM notifications WHERE user_name = ? AND is_read = 0').get(req.user.name).c;
-    const total = db.prepare('SELECT COUNT(*) as c FROM notifications WHERE user_name = ?').get(req.user.name).c;
-    res.json({ items: items.map(n => ({ ...n, is_read: !!n.is_read })), unread, total });
+    const archived = req.query.archived === '1' || req.query.archived === 'true' ? 1 : 0;
+    const me = req.user.name || '';
+    const items = db.prepare(`
+      SELECT * FROM notifications
+      WHERE user_name = ? AND IFNULL(is_archived, 0) = ?
+      ORDER BY id DESC LIMIT ? OFFSET ?
+    `).all(me, archived, limit, offset);
+    const unread = db.prepare(`
+      SELECT COUNT(*) as c FROM notifications
+      WHERE user_name = ? AND IFNULL(is_archived, 0) = 0 AND is_read = 0
+    `).get(me).c;
+    const total = db.prepare(`
+      SELECT COUNT(*) as c FROM notifications
+      WHERE user_name = ? AND IFNULL(is_archived, 0) = ?
+    `).get(me, archived).c;
+    const archiveTotal = db.prepare(`
+      SELECT COUNT(*) as c FROM notifications
+      WHERE user_name = ? AND IFNULL(is_archived, 0) = 1
+    `).get(me).c;
+    res.json({
+      items: items.map(n => ({ ...n, is_read: !!n.is_read, is_archived: !!n.is_archived })),
+      unread,
+      total,
+      archiveTotal,
+      archived: !!archived
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1431,7 +2047,10 @@ app.get('/api/notifications', requireAuth, (req, res) => {
 
 app.put('/api/notifications/read-all', requireAuth, (req, res) => {
   try {
-    db.prepare('UPDATE notifications SET is_read = 1 WHERE user_name = ?').run(req.user.name);
+    db.prepare(`
+      UPDATE notifications SET is_read = 1
+      WHERE user_name = ? AND IFNULL(is_archived, 0) = 0
+    `).run(req.user.name);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1447,19 +2066,413 @@ app.put('/api/notifications/:id/read', requireAuth, (req, res) => {
   }
 });
 
+// Soft-delete → archive (current user only)
 app.delete('/api/notifications/all', requireAuth, (req, res) => {
   try {
-    db.prepare('DELETE FROM notifications WHERE user_name = ?').run(req.user.name);
+    db.prepare(`
+      UPDATE notifications SET is_archived = 1, is_read = 1
+      WHERE user_name = ? AND IFNULL(is_archived, 0) = 0
+    `).run(req.user.name);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+app.delete('/api/notifications/:id', requireAuth, (req, res) => {
+  try {
+    const r = db.prepare(`
+      UPDATE notifications SET is_archived = 1, is_read = 1
+      WHERE id = ? AND user_name = ?
+    `).run(req.params.id, req.user.name);
+    if (!r.changes) return res.status(404).json({ error: 'Не найдено' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== GLOBAL SEARCH ====================
+
+app.get('/api/search', requireAuth, (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ items: [] });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 12, 30);
+    const like = '%' + q.replace(/[%_]/g, '') + '%';
+    const items = [];
+
+    const projects = db.prepare(`
+      SELECT id, name, client FROM projects
+      WHERE name LIKE ? OR client LIKE ? OR IFNULL(description,'') LIKE ?
+      ORDER BY updated_at DESC LIMIT 6
+    `).all(like, like, like);
+    projects.forEach(p => items.push({
+      type: 'project',
+      id: p.id,
+      title: p.name,
+      subtitle: p.client || '',
+      href: '/pages/project.html?id=' + encodeURIComponent(p.id)
+    }));
+
+    const tasks = db.prepare(`
+      SELECT id, name, person, project_id FROM tasks
+      WHERE name LIKE ? OR IFNULL(description,'') LIKE ? OR IFNULL(person,'') LIKE ?
+      ORDER BY updated_at DESC LIMIT 6
+    `).all(like, like, like);
+    tasks.forEach(t => items.push({
+      type: 'task',
+      id: t.id,
+      title: t.name,
+      subtitle: t.person || '',
+      href: '/pages/task.html?id=' + encodeURIComponent(t.id)
+    }));
+
+    const goals = db.prepare(`
+      SELECT id, name, status FROM goals
+      WHERE name LIKE ? OR IFNULL(description,'') LIKE ?
+      ORDER BY updated_at DESC LIMIT 4
+    `).all(like, like);
+    goals.forEach(g => items.push({
+      type: 'goal',
+      id: g.id,
+      title: g.name,
+      subtitle: g.status === 'done' ? 'Выполнена' : 'Активна',
+      href: '/pages/goal.html?id=' + encodeURIComponent(g.id)
+    }));
+
+    const docs = db.prepare(`
+      SELECT id, title, kind FROM wiki_pages
+      WHERE title LIKE ? OR IFNULL(content,'') LIKE ?
+      ORDER BY updated_at DESC LIMIT 4
+    `).all(like, like);
+    docs.forEach(d => items.push({
+      type: 'document',
+      id: String(d.id),
+      title: d.title,
+      subtitle: d.kind || 'page',
+      href: '/pages/documents.html?page=' + encodeURIComponent(d.id)
+    }));
+
+    const me = req.user.name || '';
+    const rems = db.prepare(`
+      SELECT id, message, remind_date FROM reminders
+      WHERE is_sent = 0 AND type = 'note'
+        AND (for_user IS NULL OR for_user = '' OR for_user = ?)
+        AND message LIKE ?
+      ORDER BY created_at DESC LIMIT 3
+    `).all(me, like);
+    rems.forEach(r => {
+      const day = (r.remind_date || '').slice(0, 10);
+      items.push({
+        type: 'reminder',
+        id: String(r.id),
+        title: String(r.message || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Напоминание',
+        subtitle: day || 'Без даты',
+        href: day
+          ? '/pages/calendar-day.html?date=' + encodeURIComponent(day)
+          : '/pages/dashboard.html'
+      });
+    });
+
+    const expenses = db.prepare(`
+      SELECT id, category, description, amount, date FROM expenses
+      WHERE description LIKE ? OR category LIKE ? OR IFNULL(note,'') LIKE ?
+      ORDER BY date DESC LIMIT 3
+    `).all(like, like, like);
+    expenses.forEach(e => items.push({
+      type: 'expense',
+      id: String(e.id),
+      title: (e.category || '') + (e.description ? ' · ' + e.description : ''),
+      subtitle: (e.amount != null ? e.amount + '₽' : '') + (e.date ? ' · ' + e.date : ''),
+      href: '/pages/money.html'
+    }));
+
+    res.json({ items: items.slice(0, limit), q });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== INTEGRATIONS + DEPLOY ====================
+
+function parseMeta(raw) {
+  try { return JSON.parse(raw || '{}'); } catch (e) { return {}; }
+}
+
+function getIntegration(id) {
+  return db.prepare('SELECT * FROM integrations WHERE id = ?').get(id);
+}
+
+function integrationPublic(r) {
+  const meta = parseMeta(r.meta);
+  let secret = {};
+  try {
+    const plain = vault.decrypt(r.secret_enc || '');
+    if (plain) secret = JSON.parse(plain);
+  } catch (e) { secret = {}; }
+  const hasSecret = !!(r.secret_enc && String(r.secret_enc).length > 0);
+  const safeSecret = {};
+  if (r.type === 'github') {
+    safeSecret.has_token = !!(secret.token);
+    safeSecret.repoUrl = secret.repoUrl || meta.repoUrl || '';
+    safeSecret.branch = secret.branch || meta.branch || 'main';
+  } else if (r.type === 'ssh_deploy' || r.type === 'server_ssh') {
+    safeSecret.has_password = !!(secret.password);
+    safeSecret.host = secret.host || meta.host || '';
+    safeSecret.port = secret.port || meta.port || 22;
+    safeSecret.username = secret.username || meta.username || '';
+    safeSecret.appDir = secret.appDir || meta.appDir || '/var/www/crm-app/server';
+    safeSecret.backupDir = secret.backupDir || meta.backupDir || '/var/www/crm-app/backups';
+    safeSecret.auto_connect = !!(meta.auto_connect);
+  } else if (String(r.type || '').startsWith('ai_')) {
+    safeSecret.has_api_key = !!(secret.api_key || secret.token);
+  }
+  const configured = hasSecret
+    || !!(safeSecret.repoUrl)
+    || !!(safeSecret.host && safeSecret.username)
+    || (String(r.type || '').startsWith('ai_') && (meta.tariff || meta.renew_date || meta.tokens_used))
+    || ['server', 'database'].includes(r.type);
+  return {
+    id: r.id,
+    type: r.type,
+    name: r.name,
+    status: r.status,
+    last_check: r.last_check,
+    last_error: r.last_error || '',
+    meta,
+    has_secret: hasSecret,
+    configured,
+    config: safeSecret,
+    created_at: r.created_at,
+    updated_at: r.updated_at
+  };
+}
+
+function decryptSecretObj(row) {
+  try {
+    const plain = vault.decrypt(row.secret_enc || '');
+    return plain ? JSON.parse(plain) : {};
+  } catch (e) { return {}; }
+}
+
+function requireAdmin(req, res) {
+  if (req.user.role !== 'admin') {
+    res.status(403).json({ error: 'Только администратор' });
+    return false;
+  }
+  return true;
+}
+
+function markIntegration(id, status, errMsg) {
+  db.prepare(`
+    UPDATE integrations SET status=?, last_check=CURRENT_TIMESTAMP, last_error=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
+  `).run(status, errMsg || '', id);
+}
+
+function sshCfgFromIntegration(row) {
+  const secret = decryptSecretObj(row);
+  const meta = parseMeta(row.meta);
+  const gh = db.prepare("SELECT * FROM integrations WHERE type = 'github' LIMIT 1").get();
+  const ghSecret = gh ? decryptSecretObj(gh) : {};
+  const ghMeta = gh ? parseMeta(gh.meta) : {};
+  return {
+    host: secret.host || meta.host,
+    port: Number(secret.port || meta.port || 22),
+    username: secret.username || meta.username,
+    password: secret.password || '',
+    appDir: secret.appDir || meta.appDir || '/var/www/crm-app/server',
+    backupDir: secret.backupDir || meta.backupDir || '/var/www/crm-app/backups',
+    repoUrl: ghSecret.repoUrl || ghMeta.repoUrl || secret.repoUrl || 'https://github.com/AndrewF250/CRM.git',
+    branch: ghSecret.branch || ghMeta.branch || 'main',
+    githubToken: ghSecret.token || ''
+  };
+}
+
+app.get('/api/integrations', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM integrations ORDER BY id').all();
+    res.json(rows.map(integrationPublic));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/integrations/health', requireAuth, (req, res) => {
+  try {
+    const dbOk = !!db.prepare('SELECT 1 as ok').get();
+    const users = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+    const projects = db.prepare('SELECT COUNT(*) as c FROM projects').get().c;
+    const tasksOpen = db.prepare('SELECT COUNT(*) as c FROM tasks WHERE IFNULL(done,0)=0').get().c;
+    const wiki = db.prepare('SELECT COUNT(*) as c FROM wiki_pages').get().c;
+    const ints = db.prepare('SELECT type, status FROM integrations').all();
+    const okIntegrations = ints.filter(i => i.status === 'ok').length;
+    const uptimeSec = Math.floor(process.uptime());
+    const info = appVersion.getInfo();
+    res.json({
+      ok: dbOk,
+      version: info.version,
+      server: { uptimeSec, node: process.version, pid: process.pid },
+      db: { ok: dbOk, users, projects, tasksOpen, wiki },
+      integrations: { total: ints.length, ok: okIntegrations },
+      checkedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.put('/api/integrations/:id', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Не найдено' });
+    const name = req.body.name != null ? String(req.body.name).trim() : row.name;
+    let meta = parseMeta(row.meta);
+    if (req.body.meta && typeof req.body.meta === 'object') {
+      meta = { ...meta, ...req.body.meta };
+    }
+    let secret = decryptSecretObj(row);
+    if (req.body.secret && typeof req.body.secret === 'object') {
+      const prev = { ...secret };
+      secret = { ...prev, ...req.body.secret };
+      // empty string / null = keep previous password/token
+      Object.keys(req.body.secret).forEach(k => {
+        if (req.body.secret[k] === '' || req.body.secret[k] === null) {
+          if (prev[k] != null && prev[k] !== '') secret[k] = prev[k];
+          else delete secret[k];
+        }
+      });
+    }
+    const enc = Object.keys(secret).length ? vault.encrypt(JSON.stringify(secret)) : (row.secret_enc || '');
+    db.prepare(`
+      UPDATE integrations SET name=?, meta=?, secret_enc=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
+    `).run(name, JSON.stringify(meta), enc, row.id);
+    res.json(integrationPublic(getIntegration(row.id)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/integrations/:id/test', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Не найдено' });
+    if (row.type === 'github') {
+      const s = decryptSecretObj(row);
+      const meta = parseMeta(row.meta);
+      const repo = s.repoUrl || meta.repoUrl || '';
+      if (!repo) {
+        markIntegration(row.id, 'error', 'Не указан URL репозитория');
+        return res.status(400).json({ ok: false, error: 'Не указан URL репозитория' });
+      }
+      markIntegration(row.id, 'ok', '');
+      return res.json({ ok: true, message: 'GitHub конфиг сохранён', repo, branch: s.branch || meta.branch || 'main', has_token: !!s.token });
+    }
+    if (row.type === 'ssh_deploy' || row.type === 'server_ssh') {
+      const cfg = sshCfgFromIntegration(row);
+      if (!cfg.host || !cfg.username || !cfg.password) {
+        markIntegration(row.id, 'error', 'Нужны host, username, password');
+        return res.status(400).json({ ok: false, error: 'Нужны host, username, password' });
+      }
+      const result = await deployOps.testConnection(cfg);
+      markIntegration(row.id, result.ok ? 'ok' : 'error', result.ok ? '' : (result.err || 'SSH fail'));
+      return res.json(result);
+    }
+    markIntegration(row.id, 'ok', '');
+    res.json({ ok: true, message: 'OK' });
+  } catch (err) {
+    try { markIntegration(req.params.id, 'error', err.message); } catch (e) {}
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/integrations/:id/backup', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || (row.type !== 'ssh_deploy' && row.type !== 'server_ssh')) {
+      return res.status(400).json({ error: 'Только для SSH-сервера' });
+    }
+    const cfg = sshCfgFromIntegration(row);
+    const result = await deployOps.backupRemoteDb(cfg);
+    markIntegration(row.id, result.ok ? 'ok' : 'error', result.ok ? '' : (result.err || 'backup fail'));
+    res.json(result);
+  } catch (err) {
+    try { markIntegration(req.params.id, 'error', err.message); } catch (e) {}
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/integrations/:id/deploy', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || (row.type !== 'ssh_deploy' && row.type !== 'server_ssh')) {
+      return res.status(400).json({ error: 'Только для SSH-сервера' });
+    }
+    const cfg = sshCfgFromIntegration(row);
+    if (!cfg.host || !cfg.username || !cfg.password) {
+      return res.status(400).json({ error: 'Сначала сохраните и проверьте SSH' });
+    }
+    const result = await deployOps.deployFromGithub(cfg);
+    markIntegration(row.id, result.ok ? 'ok' : 'error', result.ok ? '' : (result.err || 'deploy fail'));
+    res.json(result);
+  } catch (err) {
+    try { markIntegration(req.params.id, 'error', err.message); } catch (e) {}
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/integrations/:id/restore-prev', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || (row.type !== 'ssh_deploy' && row.type !== 'server_ssh')) {
+      return res.status(400).json({ error: 'Только для SSH-сервера' });
+    }
+    const result = await deployOps.restorePrevDb(sshCfgFromIntegration(row));
+    markIntegration(row.id, result.ok ? 'ok' : 'error', result.ok ? '' : (result.err || 'restore fail'));
+    res.json(result);
+  } catch (err) {
+    try { markIntegration(req.params.id, 'error', err.message); } catch (e) {}
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/integrations/:id/keep-old-db', requireAuth, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row || (row.type !== 'ssh_deploy' && row.type !== 'server_ssh')) {
+      return res.status(400).json({ error: 'Только для SSH-сервера' });
+    }
+    const result = await deployOps.keepOnlyOldDb(sshCfgFromIntegration(row));
+    markIntegration(row.id, result.ok ? 'ok' : 'error', result.ok ? '' : (result.err || 'keep-old fail'));
+    res.json(result);
+  } catch (err) {
+    try { markIntegration(req.params.id, 'error', err.message); } catch (e) {}
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ==================== VERSION (realtime polling) ====================
 
 app.get('/api/version', requireAuth, (req, res) => {
-  res.json({ v: changeVersion });
+  const info = appVersion.getInfo();
+  res.json({ v: changeVersion, app: info.version, name: info.name });
+});
+
+app.get('/api/app-info', requireAuth, (req, res) => {
+  const info = appVersion.getInfo();
+  let changelogHead = '';
+  try {
+    const fs = require('fs');
+    const p = require('path').join(__dirname, '..', 'CHANGELOG.md');
+    changelogHead = fs.readFileSync(p, 'utf8').split('\n').slice(0, 40).join('\n');
+  } catch (e) {}
+  res.json({ ...info, poll: changeVersion, changelogHead });
 });
 
 // ==================== STATS API ====================

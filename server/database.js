@@ -106,9 +106,29 @@ db.exec(`
     person TEXT DEFAULT '',
     project_id TEXT,
     note TEXT DEFAULT '',
+    subcategory TEXT DEFAULT '',
+    explanation TEXT DEFAULT '',
+    is_recurring INTEGER DEFAULT 0,
+    recur_interval TEXT DEFAULT 'month',
+    next_date TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Migration: expense fields (AI subgroup, recurring, etc.)
+['subcategory', 'explanation', 'recur_interval', 'next_date'].forEach(col => {
+  try {
+    db.prepare(`SELECT ${col} FROM expenses LIMIT 1`).get();
+  } catch (e) {
+    const def = col === 'recur_interval' ? "DEFAULT 'month'" : "DEFAULT ''";
+    db.exec(`ALTER TABLE expenses ADD COLUMN ${col} TEXT ${def}`);
+  }
+});
+try {
+  db.prepare('SELECT is_recurring FROM expenses LIMIT 1').get();
+} catch (e) {
+  db.exec('ALTER TABLE expenses ADD COLUMN is_recurring INTEGER DEFAULT 0');
+}
 
 // Migration: add payment_due_date if not exists
 try {
@@ -142,6 +162,64 @@ db.exec(`
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
   );
 `);
+
+try {
+  db.prepare('SELECT expense_id FROM reminders LIMIT 1').get();
+} catch (e) {
+  db.exec('ALTER TABLE reminders ADD COLUMN expense_id INTEGER');
+}
+try {
+  db.prepare('SELECT notified FROM reminders LIMIT 1').get();
+} catch (e) {
+  db.exec('ALTER TABLE reminders ADD COLUMN notified INTEGER DEFAULT 0');
+}
+try {
+  db.prepare('SELECT created_by FROM reminders LIMIT 1').get();
+} catch (e) {
+  db.exec("ALTER TABLE reminders ADD COLUMN created_by TEXT DEFAULT ''");
+}
+try {
+  db.prepare('SELECT for_user FROM reminders LIMIT 1').get();
+} catch (e) {
+  db.exec("ALTER TABLE reminders ADD COLUMN for_user TEXT DEFAULT ''");
+}
+
+// Allow NULL project_id for note/expense reminders (FK was blocking '')
+try {
+  const remInfo = db.prepare('PRAGMA table_info(reminders)').all();
+  const projCol = remInfo.find(c => c.name === 'project_id');
+  if (projCol && projCol.notnull === 1) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE reminders_mig (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT,
+        type TEXT DEFAULT 'payment',
+        message TEXT NOT NULL,
+        remind_date TEXT NOT NULL DEFAULT '',
+        is_sent INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expense_id INTEGER,
+        notified INTEGER DEFAULT 0,
+        created_by TEXT DEFAULT '',
+        for_user TEXT DEFAULT ''
+      );
+      INSERT INTO reminders_mig (id, project_id, type, message, remind_date, is_sent, created_at, expense_id, notified, created_by, for_user)
+      SELECT id,
+        CASE WHEN project_id IS NULL OR project_id = '' THEN NULL ELSE project_id END,
+        type, message, COALESCE(remind_date, ''), is_sent, created_at, expense_id,
+        COALESCE(notified, 0), COALESCE(created_by, ''),
+        COALESCE(for_user, '')
+      FROM reminders;
+      DROP TABLE reminders;
+      ALTER TABLE reminders_mig RENAME TO reminders;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+} catch (e) {
+  console.error('reminders project_id migration failed:', e.message);
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+}
 
 // Migration: add doc_category if not exists
 try {
@@ -257,6 +335,95 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_name, is_read);
 `);
 
+try {
+  db.prepare('SELECT is_archived FROM notifications LIMIT 1').get();
+} catch (e) {
+  db.exec('ALTER TABLE notifications ADD COLUMN is_archived INTEGER DEFAULT 0');
+}
+try {
+  db.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_arch ON notifications(user_name, is_archived, id)');
+} catch (e) {}
+
+// Integrations registry (secrets stay server-side; no plaintext keys in meta)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS integrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT DEFAULT 'idle',
+    last_check DATETIME,
+    last_error TEXT DEFAULT '',
+    meta TEXT DEFAULT '{}',
+    secret_enc TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+try {
+  const n = db.prepare('SELECT COUNT(*) as c FROM integrations').get().c;
+  if (!n) {
+    const ins = db.prepare(
+      "INSERT INTO integrations (type, name, status, meta) VALUES (?, ?, ?, ?)"
+    );
+    ins.run('server', 'CRM App (local)', 'ok', JSON.stringify({ port: 3005, role: 'app' }));
+    ins.run('database', 'SQLite crm.db', 'ok', JSON.stringify({ engine: 'sqlite' }));
+    ins.run('subscription', 'Хостинг / домен', 'idle', JSON.stringify({ note: 'Подключите биллинг позже' }));
+  }
+  const ensure = (type, name, meta) => {
+    const ex = db.prepare('SELECT id FROM integrations WHERE type = ? LIMIT 1').get(type);
+    if (!ex) {
+      db.prepare("INSERT INTO integrations (type, name, status, meta) VALUES (?, ?, 'idle', ?)")
+        .run(type, name, JSON.stringify(meta));
+    }
+  };
+  ensure('github', 'GitHub (деплой)', {
+    repoUrl: 'https://github.com/AndrewF250/CRM.git',
+    branch: 'main',
+    label: 'Исходники для деплоя на сервер'
+  });
+  ensure('ssh_deploy', 'Сервер (SSH деплой)', {
+    host: '78.17.100.31',
+    port: 22,
+    username: 'root',
+    appDir: '/var/www/crm-app/server',
+    backupDir: '/var/www/crm-app/backups',
+    auto_connect: false,
+    label: 'Прод-сервер: заливка кода и бэкап БД'
+  });
+  ensure('ai_openai', 'OpenAI / ChatGPT', {
+    provider: 'openai',
+    tokens_used: 0,
+    tokens_limit: 0,
+    purchase_date: '',
+    renew_date: '',
+    tariff: '',
+    label: 'Расход токенов и дата тарифа'
+  });
+  ensure('ai_claude', 'Anthropic Claude', {
+    provider: 'anthropic',
+    tokens_used: 0,
+    tokens_limit: 0,
+    purchase_date: '',
+    renew_date: '',
+    tariff: '',
+    label: 'Расход токенов и дата тарифа'
+  });
+  ensure('ai_other', 'Другая нейронка', {
+    provider: 'other',
+    tokens_used: 0,
+    tokens_limit: 0,
+    purchase_date: '',
+    renew_date: '',
+    tariff: '',
+    label: 'Любой API: токены и тариф'
+  });
+  try {
+    db.prepare("UPDATE integrations SET name = 'CRM App (этот сервер)', status = 'ok' WHERE type = 'server'").run();
+    db.prepare("UPDATE integrations SET name = 'База данных SQLite', status = 'ok' WHERE type = 'database'").run();
+    db.prepare("UPDATE integrations SET name = 'Хостинг / домен (биллинг)' WHERE type = 'subscription'").run();
+  } catch (e) {}
+} catch (e) {}
+
 // Migration: add assignee to projects
 try {
   db.prepare("SELECT assignee FROM projects LIMIT 1").get();
@@ -280,10 +447,68 @@ db.exec(`
 // Seed default users if table is empty
 const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 if (userCount === 0) {
+  const { hashPassword: hp } = require('./auth-passwords');
   const insertUser = db.prepare('INSERT INTO users (username, password, name, role, avatar) VALUES (?, ?, ?, ?, ?)');
-  insertUser.run('Костя', 'kostya2026', 'Костя', 'admin', 'КИ');
-  insertUser.run('Максим', 'maxim2026', 'Максим', 'admin', 'МИ');
-  insertUser.run('Андрей', 'andrey2026', 'Андрей', 'admin', 'АН');
+  insertUser.run('Костя', hp('kostya2026'), 'Костя', 'admin', 'КИ');
+  insertUser.run('Максим', hp('maxim2026'), 'Максим', 'admin', 'МИ');
+  insertUser.run('Андрей', hp('andrey2026'), 'Андрей', 'admin', 'АН');
+}
+
+// Per-user notification preferences
+for (const col of [
+  'notif_reminders',
+  'notif_deadlines',
+  'notif_deadline_week',
+  'notif_deadline_day',
+  'notif_overdue'
+]) {
+  try {
+    db.prepare(`SELECT ${col} FROM users LIMIT 1`).get();
+  } catch (e) {
+    db.exec(`ALTER TABLE users ADD COLUMN ${col} INTEGER DEFAULT 1`);
+  }
+}
+
+// Upgrade plaintext passwords → bcrypt
+try {
+  const { isHashed, hashPassword } = require('./auth-passwords');
+  const plainUsers = db.prepare('SELECT id, password FROM users').all();
+  const upd = db.prepare('UPDATE users SET password = ? WHERE id = ?');
+  for (const u of plainUsers) {
+    if (u.password && !isHashed(u.password)) {
+      upd.run(hashPassword(u.password), u.id);
+    }
+  }
+} catch (e) {
+  console.error('password hash migration:', e.message);
+}
+
+// Migrate checklist subtasks → nested tasks (parent_id)
+try {
+  const subs = db.prepare('SELECT * FROM subtasks').all();
+  if (subs.length) {
+    const hasTask = db.prepare('SELECT id FROM tasks WHERE id = ?');
+    const ins = db.prepare(`
+      INSERT INTO tasks (id, project_id, name, column_status, person, date, date_end, time, done, urgent, hashtags, parent_id, priority, description, is_epic, created_by, updated_by)
+      VALUES (?, ?, ?, 'Ожидает', ?, '', '', '', ?, 0, '[]', ?, '', '', 0, '', '')
+    `);
+    for (const s of subs) {
+      const id = 'task_sub_' + s.id;
+      if (hasTask.get(id)) continue;
+      const parent = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(s.task_id);
+      ins.run(
+        id,
+        (parent && parent.project_id) || '',
+        s.name || 'Подзадача',
+        s.person || '',
+        s.done ? 1 : 0,
+        s.task_id
+      );
+    }
+    db.prepare('DELETE FROM subtasks').run();
+  }
+} catch (e) {
+  console.error('subtasks→parent_id migration:', e.message);
 }
 
 // Migration: epic flag for tasks (Agile-style parent stories)
@@ -391,41 +616,41 @@ try {
   }
 } catch (e) {}
 
-// One-time migrate legacy documents → wiki_pages (only if wiki empty)
+// Migrate legacy documents → wiki_pages (Documents = single store)
 try {
-  const wikiCount = db.prepare('SELECT COUNT(*) as c FROM wiki_pages').get().c;
-  if (wikiCount === 0) {
-    const legacy = db.prepare('SELECT * FROM documents ORDER BY created_at ASC').all();
-    if (legacy.length) {
-      const ins = db.prepare(`INSERT INTO wiki_pages
-        (parent_id, title, content, kind, project_id, file_path, file_type, file_size, sort_order, created_at, updated_at)
-        VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`);
-      let order = 0;
-      for (const d of legacy) {
-        let kind = 'file';
-        if (d.doc_category === 'template') {
-          const tc = (d.template_category || '').toLowerCase();
-          if (tc.includes('промпт') || tc.includes('prompt')) kind = 'prompt';
-          else if (tc.includes('шаблон') || tc.includes('template')) kind = 'template';
-          else kind = 'template';
-        }
-        ins.run(
-          null,
-          d.name || 'Без названия',
-          kind,
-          d.project_id || null,
-          d.file_path || '',
-          d.type || '',
-          d.size || '',
-          order++,
-          d.created_at || new Date().toISOString(),
-          d.created_at || new Date().toISOString()
-        );
-      }
+  const legacy = db.prepare('SELECT * FROM documents ORDER BY created_at ASC').all();
+  const wikiHas = db.prepare(`
+    SELECT id FROM wiki_pages
+    WHERE title = ? AND IFNULL(project_id,'') = IFNULL(?, '')
+      AND IFNULL(file_path,'') = IFNULL(?, '')
+    LIMIT 1
+  `);
+  const ins = db.prepare(`INSERT INTO wiki_pages
+    (parent_id, title, content, kind, project_id, file_path, file_type, file_size, sort_order, created_at, updated_at, created_by, updated_by)
+    VALUES (NULL, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, 'migrate', 'migrate')`);
+  let order = 1000;
+  for (const d of legacy) {
+    if (wikiHas.get(d.name || '', d.project_id || null, d.file_path || '')) continue;
+    let kind = 'file';
+    if (d.doc_category === 'template') {
+      const tc = (d.template_category || '').toLowerCase();
+      if (tc.includes('промпт') || tc.includes('prompt')) kind = 'prompt';
+      else kind = 'template';
     }
+    ins.run(
+      d.name || 'Без названия',
+      kind,
+      d.project_id || null,
+      d.file_path || '',
+      d.type || '',
+      d.size || '',
+      order++,
+      d.created_at || new Date().toISOString(),
+      d.created_at || new Date().toISOString()
+    );
   }
 } catch (e) {
-  // ignore migration errors
+  console.error('documents→wiki migration:', e.message);
 }
 
 module.exports = db;

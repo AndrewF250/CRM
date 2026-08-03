@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Деньги — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=45">
+    <title>Финансы — CRM System</title>
+    <link rel="stylesheet" href="/assets/css/style.css?v=54">
     <style>
         .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 2px solid var(--gray-200); padding-bottom: 0; }
         .tab { padding: 10px 20px; cursor: pointer; font-weight: 500; color: var(--gray-500); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; }
@@ -23,13 +23,22 @@
         .expense-info { flex: 1; min-width: 0; }
         .expense-category { display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 500; margin-bottom: 4px; }
         .expense-category.salary { background: #dbeafe; color: #1e40af; }
-        .expense-category.equipment { background: #fef3c7; color: #92400e; }
-        .expense-category.service { background: #d1fae5; color: #065f46; }
+        .expense-category.servers { background: #e0e7ff; color: #3730a3; }
+        .expense-category.ai { background: #fce7f3; color: #9d174d; }
+        .expense-category.tax { background: #ffedd5; color: #9a3412; }
+        .expense-category.refund { background: #d1fae5; color: #065f46; }
         .expense-category.other { background: #f3f4f6; color: #374151; }
+        .expense-badge-recur {
+            display: inline-block; margin-left: 6px; padding: 1px 6px;
+            font-size: 0.7rem; border-radius: 999px; background: #fef3c7; color: #92400e; font-weight: 600;
+        }
         .expense-desc { font-weight: 500; }
         .expense-meta { font-size: 0.8rem; color: var(--gray-500); margin-top: 2px; }
         .expense-amount { font-size: 1.1rem; font-weight: 600; white-space: nowrap; }
         .expense-amount.negative { color: var(--danger); }
+        .expense-amount.positive { color: var(--success); }
+        .recur-interval-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+        .recur-interval-row .form-select { flex: 1; }
         .expense-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
         .salary-status { padding: 4px 10px; border-radius: var(--radius-sm); font-size: 0.8rem; font-weight: 500; white-space: nowrap; }
         .salary-status.paid { background: #d1fae5; color: #065f46; }
@@ -42,6 +51,7 @@
         .category-name { font-size: 0.85rem; color: var(--gray-600); }
         .category-amount { font-weight: 600; margin-left: auto; }
         .money-salary-fields[hidden] { display: none !important; }
+        #expenseCustomRecurBox[hidden] { display: none !important; }
     </style>
 </head>
 <body>
@@ -49,7 +59,8 @@
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=23"></script>
-    <script src="/assets/js/app.js?v=38"></script>
+    <script src="/assets/js/app.js?v=48"></script>
+    <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -60,14 +71,53 @@
         let categoryFilter = '';
         let expenses = [];
         let salaries = [];
+        let projects = [];
         let expenseStats = { categories: [], total: 0 };
 
-        const CATEGORIES = ['Зарплата', 'Оборудование', 'Сервисы', 'Реклама', 'Аренда', 'Связь', 'Транспорт', 'Питание', 'Прочее'];
+        const CATEGORIES = ['Сервера', 'ИИ', 'Налоги', 'Возврат', 'Зарплата'];
+        const AI_SUBGROUPS = ['Костя', 'Максим', 'Андрей', 'Общий'];
+        const RECUR_BASE = [
+            { value: 'day', label: 'День' },
+            { value: 'week', label: 'Неделя' },
+            { value: 'month', label: 'Месяц' },
+            { value: 'year', label: 'Год' }
+        ];
+        const CUSTOM_RECUR_KEY = 'crm_custom_recur_intervals';
+
+        function loadCustomRecur() {
+            try { return JSON.parse(localStorage.getItem(CUSTOM_RECUR_KEY) || '[]'); }
+            catch (_) { return []; }
+        }
+        function saveCustomRecur(list) {
+            localStorage.setItem(CUSTOM_RECUR_KEY, JSON.stringify(list));
+        }
+        function recurOptionsHtml(selected) {
+            const customs = loadCustomRecur();
+            const all = RECUR_BASE.concat(customs);
+            return all.map(o =>
+                `<option value="${esc(o.value)}"${o.value === selected ? ' selected' : ''}>${esc(o.label)}</option>`
+            ).join('');
+        }
+        function unitWord(n, unit) {
+            const forms = {
+                day: ['день', 'дня', 'дней'],
+                week: ['неделя', 'недели', 'недель'],
+                month: ['месяц', 'месяца', 'месяцев'],
+                year: ['год', 'года', 'лет']
+            };
+            const f = forms[unit] || forms.day;
+            const abs = Math.abs(n) % 100;
+            const d = abs % 10;
+            if (abs > 10 && abs < 20) return f[2];
+            if (d === 1) return f[0];
+            if (d >= 2 && d <= 4) return f[1];
+            return f[2];
+        }
 
         function render() {
             app.innerHTML = renderSidebar('money') + renderHeader() + `
                 <div class="page-header">
-                    <div><h1 class="page-title">Деньги</h1><p class="page-subtitle">Управление финансами</p></div>
+                    <div><h1 class="page-title">Финансы</h1><p class="page-subtitle">Управление финансами</p></div>
                     <div class="page-actions">
                         <button class="btn btn-primary" onclick="showAddExpenseModal()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -124,8 +174,20 @@
         }
 
         function getCategoryClass(cat) {
-            const map = { 'Зарплата': 'salary', 'Оборудование': 'equipment', 'Сервисы': 'service' };
+            const map = {
+                'Зарплата': 'salary',
+                'Сервера': 'servers',
+                'ИИ': 'ai',
+                'Налоги': 'tax',
+                'Возврат': 'refund'
+            };
             return map[cat] || 'other';
+        }
+
+        function projectLabel(id) {
+            const p = projects.find(x => String(x.id) === String(id));
+            if (!p) return '';
+            return (p.client ? p.client + ' — ' : '') + p.name;
         }
 
         function formatMoney(amount) {
@@ -161,19 +223,27 @@
                 </div>`;
             }
             const e = item;
+            const titleParts = [];
+            if (e.category === 'ИИ' && e.subcategory) titleParts.push(e.subcategory);
+            if (e.description) titleParts.push(e.description);
+            const title = titleParts.join(' · ') || e.category;
+            const isRefund = e.category === 'Возврат';
             const meta = [
                 e.date ? formatRuDate(e.date) : '',
-                e.person || '',
-                e.note || ''
+                e.project_id ? projectLabel(e.project_id) : '',
+                e.explanation || '',
+                e.note || '',
+                e.is_recurring ? ('повтор · след. ' + formatRuDate(e.next_date || e.date)) : ''
             ].filter(Boolean).join(' · ');
             return `
                 <div class="expense-card" data-kind="expense" data-id="${e.id}">
                     <div class="expense-info">
                         <span class="expense-category ${getCategoryClass(e.category)}">${esc(e.category)}</span>
-                        <div class="expense-desc">${esc(e.description)}</div>
+                        ${e.is_recurring ? '<span class="expense-badge-recur">↻ повтор</span>' : ''}
+                        <div class="expense-desc">${esc(title)}</div>
                         <div class="expense-meta">${esc(meta)}</div>
                     </div>
-                    <div class="expense-amount negative">-${formatMoney(e.amount)} ₽</div>
+                    <div class="expense-amount ${isRefund ? 'positive' : 'negative'}">${isRefund ? '+' : '-'}${formatMoney(e.amount)} ₽</div>
                     <div class="expense-actions">
                         <button class="btn btn-sm btn-ghost" onclick="deleteExpense(${e.id})" title="Удалить" aria-label="Удалить">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
@@ -230,19 +300,26 @@
             const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
             const salaryTotal = salaries.reduce((sum, s) => sum + (s.amount || 0), 0);
             const salaryPaid = salaries.filter(s => s.paid).reduce((sum, s) => sum + (s.amount || 0), 0);
-            // Merge salary total into category breakdown for display
-            const cats = [...(expenseStats.categories || [])];
+            const allCats = [...(expenseStats.categories || [])];
+            const refundCat = allCats.find(c => c.category === 'Возврат');
+            const refundTotal = refundCat ? (refundCat.total || 0) : 0;
+            // Expenses without refunds
+            const cats = allCats.filter(c => c.category !== 'Возврат');
             const salIdx = cats.findIndex(c => c.category === 'Зарплата');
             if (salaryTotal > 0) {
                 if (salIdx >= 0) cats[salIdx] = { category: 'Зарплата', total: (cats[salIdx].total || 0) + salaryTotal };
                 else cats.unshift({ category: 'Зарплата', total: salaryTotal });
             }
-            const grandTotal = (expenseStats.total || 0) + salaryTotal;
+            const expensesOnly = cats.reduce((sum, c) => sum + (c.total || 0), 0);
             return `
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-label">Всего расходов</div>
-                        <div class="stat-value expense">${formatMoney(grandTotal)} ₽</div>
+                        <div class="stat-value expense">${formatMoney(expensesOnly)} ₽</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Возврат сумм</div>
+                        <div class="stat-value income">+${formatMoney(refundTotal)} ₽</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Зарплаты</div>
@@ -267,6 +344,19 @@
                         </div>
                     </div>
                 </div>
+                ${refundTotal > 0 ? `
+                <div class="card" style="margin-top:16px;">
+                    <div class="card-header"><h3 class="card-title">Возврат сумм</h3></div>
+                    <div class="card-body">
+                        <div class="category-breakdown">
+                            <div class="category-item">
+                                <div class="category-dot" style="background:#10b981"></div>
+                                <span class="category-name">Возврат</span>
+                                <span class="category-amount" style="color:var(--success);">+${formatMoney(refundTotal)} ₽</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>` : ''}
             `;
         }
 
@@ -287,86 +377,195 @@
 
         async function loadData() {
             try {
-                const [expRes, salRes, statsRes] = await Promise.all([
+                const [expRes, salRes, statsRes, projRes] = await Promise.all([
                     API.get(`/api/expenses?month=${currentMonth}`),
                     API.get(`/api/salaries?month=${currentMonth}`),
-                    API.get(`/api/expenses/stats?month=${currentMonth}`)
+                    API.get(`/api/expenses/stats?month=${currentMonth}`),
+                    API.getProjects().catch(() => [])
                 ]);
                 expenses = expRes || [];
                 salaries = salRes || [];
                 expenseStats = statsRes || { categories: [], total: 0 };
+                projects = Array.isArray(projRes) ? projRes : [];
                 renderTabContent();
             } catch (err) {
                 console.error('Failed to load data:', err);
             }
         }
 
-        function syncExpenseSalaryFields() {
+        function syncExpenseFormFields() {
             const cat = document.getElementById('expenseCategory')?.value;
-            const box = document.getElementById('moneySalaryFields');
-            const descGroup = document.getElementById('expenseDescGroup');
-            const personGroup = document.getElementById('expensePersonGroup');
             const isSal = cat === 'Зарплата';
-            if (box) box.hidden = !isSal;
-            if (descGroup) descGroup.hidden = isSal;
-            if (personGroup) personGroup.hidden = isSal;
+            const isAi = cat === 'ИИ';
+            const isRefund = cat === 'Возврат';
+            const salBox = document.getElementById('moneySalaryFields');
+            const aiBox = document.getElementById('moneyAiFields');
+            const projectBox = document.getElementById('moneyProjectFields');
+            const descGroup = document.getElementById('expenseDescGroup');
+            if (salBox) salBox.hidden = !isSal;
+            if (aiBox) aiBox.hidden = !isAi;
+            if (projectBox) projectBox.hidden = !isRefund;
+            if (descGroup) {
+                descGroup.hidden = isSal;
+                const label = descGroup.querySelector('.form-label');
+                const input = document.getElementById('expenseDesc');
+                if (label) {
+                    label.textContent = isAi ? 'Название / сервис' : (isRefund ? 'Причина возврата *' : 'Описание *');
+                }
+                if (input) {
+                    input.placeholder = isRefund ? 'Причина возврата' : (isAi ? 'Название / сервис' : 'На что потрачено?');
+                }
+            }
+            const recurBox = document.getElementById('expenseRecurBox');
+            if (recurBox) recurBox.hidden = isSal;
+            const recurHint = document.getElementById('expenseRecurHint');
+            const recurOn = !isSal && document.getElementById('expenseRecurring')?.checked;
+            if (recurHint) recurHint.hidden = !recurOn;
+        }
+
+        window.addCustomRecurInterval = function() {
+            const box = document.getElementById('expenseCustomRecurBox');
+            if (!box) return;
+            box.hidden = !box.hidden;
+            if (!box.hidden) document.getElementById('customRecurN')?.focus();
+        };
+        window.saveCustomRecurInterval = function() {
+            const n = parseInt(document.getElementById('customRecurN')?.value, 10);
+            const unit = document.getElementById('customRecurUnit')?.value;
+            if (!n || n < 1) {
+                showToast('Введите число ≥ 1', 'error');
+                return;
+            }
+            if (!['day', 'week', 'month', 'year'].includes(unit)) {
+                showToast('Выберите единицу', 'error');
+                return;
+            }
+            const value = `every:${n}:${unit}`;
+            const label = `Каждые ${n} ${unitWord(n, unit)}`;
+            const list = loadCustomRecur().filter(x => x.value !== value);
+            list.push({ value, label });
+            saveCustomRecur(list);
+            const sel = document.getElementById('expenseRecurInterval');
+            if (sel) sel.innerHTML = recurOptionsHtml(value);
+            const box = document.getElementById('expenseCustomRecurBox');
+            if (box) box.hidden = true;
+            showToast('Период добавлен: ' + label, 'success');
+        };
+
+        function collectExpenseDraft() {
+            return {
+                category: document.getElementById('expenseCategory')?.value || '',
+                salaryUser: document.getElementById('salaryUser')?.value || '',
+                salaryMethod: document.getElementById('salaryMethod')?.value || '',
+                aiSub: document.getElementById('expenseAiSub')?.value || '',
+                explanation: document.getElementById('expenseExplanation')?.value || '',
+                projectId: document.getElementById('expenseProject')?.value || '',
+                description: document.getElementById('expenseDesc')?.value || '',
+                amount: document.getElementById('expenseAmount')?.value || '',
+                date: document.getElementById('expenseDate')?.value || '',
+                recurring: !!document.getElementById('expenseRecurring')?.checked,
+                recurInterval: document.getElementById('expenseRecurInterval')?.value || 'month',
+                note: document.getElementById('expenseNote')?.value || ''
+            };
         }
 
         window.showAddExpenseModal = function() {
             const todayStr = new Date().toISOString().split('T')[0];
+            const draftKey = 'new_expense';
+            const d = (typeof DraftStore !== 'undefined' && DraftStore.load(draftKey)) || {};
+            const pref = (d.category && CATEGORIES.includes(d.category))
+                ? d.category
+                : (categoryFilter && CATEGORIES.includes(categoryFilter) ? categoryFilter : 'Сервера');
+            const projectOpts = '<option value="">Выберите проект…</option>' +
+                projects.map(p => `<option value="${esc(p.id)}"${d.projectId === p.id ? ' selected' : ''}>${esc((p.client ? p.client + ' — ' : '') + p.name)}</option>`).join('');
             const overlay = document.getElementById('modalOverlay');
             overlay.innerHTML = `
-                <div class="modal" onclick="event.stopPropagation()">
+                <div class="modal" onclick="event.stopPropagation()" data-draft-key="${draftKey}">
                     <div class="modal-header"><h3 class="modal-title">Новый расход</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
                     <div class="modal-body">
                         <div class="form-group"><label class="form-label" for="expenseCategory">Категория *</label>
                             <select class="form-select" id="expenseCategory">
-                                ${CATEGORIES.map(c => `<option${c === 'Зарплата' && categoryFilter === 'Зарплата' ? ' selected' : ''}>${c}</option>`).join('')}
+                                ${CATEGORIES.map(c => `<option${c === pref ? ' selected' : ''}>${c}</option>`).join('')}
                             </select>
                         </div>
-                        <div class="form-group" id="expenseDescGroup"><label class="form-label" for="expenseDesc">Описание *</label><input type="text" class="form-input" id="expenseDesc" placeholder="На что потрачено?"></div>
                         <div class="money-salary-fields" id="moneySalaryFields" hidden>
                             <div class="form-group"><label class="form-label" for="salaryUser">Сотрудник *</label>
                                 <select class="form-select" id="salaryUser">
-                                    <option>Костя</option>
-                                    <option>Максим</option>
-                                    <option>Андрей</option>
+                                    ${['Костя','Максим','Андрей'].map(u => `<option${(d.salaryUser || '') === u ? ' selected' : ''}>${u}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="form-group"><label class="form-label" for="salaryMethod">Способ выплаты *</label>
                                 <select class="form-select" id="salaryMethod">
-                                    <option value="cash">Наличка</option>
-                                    <option value="transfer" selected>Перевод</option>
+                                    <option value="cash"${d.salaryMethod === 'cash' ? ' selected' : ''}>Наличка</option>
+                                    <option value="transfer"${(!d.salaryMethod || d.salaryMethod === 'transfer') ? ' selected' : ''}>Перевод</option>
                                 </select>
                             </div>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="expenseAmount">Сумма *</label><input type="number" class="form-input" id="expenseAmount" placeholder="0"></div>
-                            <div class="form-group"><label class="form-label" for="expenseDate">Дата *</label><input type="date" class="form-input" id="expenseDate" value="${todayStr}"></div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group" id="expensePersonGroup"><label class="form-label" for="expensePerson">Кто</label>
-                                <select class="form-select" id="expensePerson">
-                                    <option value="">-</option>
-                                    <option>Костя</option>
-                                    <option>Максим</option>
-                                    <option>Андрей</option>
+                        <div id="moneyAiFields" hidden>
+                            <div class="form-group"><label class="form-label" for="expenseAiSub">Подгруппа ИИ *</label>
+                                <select class="form-select" id="expenseAiSub">
+                                    ${AI_SUBGROUPS.map(s => `<option${(d.aiSub || '') === s ? ' selected' : ''}>${s}</option>`).join('')}
                                 </select>
                             </div>
-                            <div class="form-group"><label class="form-label" for="expenseNote">Комментарий</label><input type="text" class="form-input" id="expenseNote" placeholder="Комментарий"></div>
+                            <div class="form-group"><label class="form-label" for="expenseExplanation">Пояснение</label>
+                                <input type="text" class="form-input" id="expenseExplanation" value="${esc(d.explanation || '')}" placeholder="Для чего / какой сервис">
+                            </div>
+                        </div>
+                        <div id="moneyProjectFields" hidden>
+                            <div class="form-group"><label class="form-label" for="expenseProject">Проект *</label>
+                                <select class="form-select" id="expenseProject">${projectOpts}</select>
+                            </div>
+                        </div>
+                        <div class="form-group" id="expenseDescGroup"><label class="form-label" for="expenseDesc">Описание *</label>
+                            <input type="text" class="form-input" id="expenseDesc" value="${esc(d.description || '')}" placeholder="На что потрачено?">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label" for="expenseAmount">Сумма *</label><input type="number" class="form-input" id="expenseAmount" value="${esc(d.amount || '')}" placeholder="0"></div>
+                            <div class="form-group"><label class="form-label" for="expenseDate">Дата *</label><input type="date" class="form-input" id="expenseDate" value="${esc(d.date || todayStr)}"></div>
+                        </div>
+                        <div class="form-group" id="expenseRecurBox">
+                            <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                <input type="checkbox" id="expenseRecurring"${d.recurring ? ' checked' : ''}> Повторяющийся расход
+                            </label>
+                            <div id="expenseRecurHint" class="text-sm text-muted" style="margin-top:6px;" hidden>
+                                Напоминание придёт за 3 дня до следующего списания.
+                                <div class="form-group" style="margin-top:8px;margin-bottom:0;">
+                                    <label class="form-label" for="expenseRecurInterval">Период</label>
+                                    <div class="recur-interval-row">
+                                        <select class="form-select" id="expenseRecurInterval">
+                                            ${recurOptionsHtml(d.recurInterval || 'month')}
+                                        </select>
+                                        <button type="button" class="btn btn-secondary" onclick="addCustomRecurInterval()" title="Новый период" aria-label="Новый период">+</button>
+                                    </div>
+                                    <div id="expenseCustomRecurBox" hidden style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                        <span>Каждые</span>
+                                        <input type="number" min="1" value="2" class="form-input" id="customRecurN" style="width:80px;">
+                                        <select class="form-select" id="customRecurUnit" style="width:auto;">
+                                            <option value="day">день</option>
+                                            <option value="week" selected>неделя</option>
+                                            <option value="month">месяц</option>
+                                            <option value="year">год</option>
+                                        </select>
+                                        <button type="button" class="btn btn-sm btn-primary" onclick="saveCustomRecurInterval()">Добавить</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group"><label class="form-label" for="expenseNote">Комментарий</label>
+                            <input type="text" class="form-input" id="expenseNote" value="${esc(d.note || '')}" placeholder="Комментарий">
                         </div>
                     </div>
-                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="addExpense()">Добавить</button></div>
+                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal(true)">Отмена</button><button class="btn btn-primary" onclick="addExpense()">Добавить</button></div>
                 </div>
             `;
             overlay.classList.add('show');
             document.body.style.overflow = 'hidden';
-            document.getElementById('expenseCategory')?.addEventListener('change', syncExpenseSalaryFields);
-            if (categoryFilter === 'Зарплата') {
-                const cat = document.getElementById('expenseCategory');
-                if (cat) cat.value = 'Зарплата';
+            document.getElementById('expenseCategory')?.addEventListener('change', syncExpenseFormFields);
+            document.getElementById('expenseRecurring')?.addEventListener('change', syncExpenseFormFields);
+            syncExpenseFormFields();
+            if (typeof DraftStore !== 'undefined') {
+                DraftStore.bind(draftKey, collectExpenseDraft, () => {});
             }
-            syncExpenseSalaryFields();
         };
 
         window.addExpense = async function() {
@@ -377,6 +576,8 @@
                 const amount = parseFloat(document.getElementById('expenseAmount').value);
                 const date = document.getElementById('expenseDate').value;
                 const note = document.getElementById('expenseNote').value.trim();
+                const is_recurring = !!document.getElementById('expenseRecurring')?.checked;
+                const recur_interval = document.getElementById('expenseRecurInterval')?.value || 'month';
 
                 if (category === 'Зарплата') {
                     if (!validateForm([
@@ -390,6 +591,7 @@
                         user_name, amount, month, note,
                         pay_date: date, payment_method
                     });
+                    if (typeof DraftStore !== 'undefined') DraftStore.clear('new_expense');
                     closeModal();
                     showToast('Зарплата добавлена', 'success');
                     loadData();
@@ -397,16 +599,38 @@
                 }
 
                 if (!validateForm([
-                    { id: 'expenseDesc', required: true, message: 'Введите описание' },
                     { id: 'expenseAmount', required: true, message: 'Введите сумму' },
                     { id: 'expenseDate', required: true, message: 'Выберите дату' }
                 ])) return;
 
-                const description = document.getElementById('expenseDesc').value.trim();
-                const person = document.getElementById('expensePerson').value;
-                await API.post('/api/expenses', { category, description, amount, date, person, note });
+                let description = (document.getElementById('expenseDesc')?.value || '').trim();
+                let subcategory = '';
+                let explanation = '';
+                let project_id = null;
+
+                if (category === 'ИИ') {
+                    subcategory = document.getElementById('expenseAiSub').value;
+                    explanation = (document.getElementById('expenseExplanation')?.value || '').trim();
+                    if (!description) description = subcategory;
+                }
+                if (category === 'Возврат') {
+                    project_id = document.getElementById('expenseProject').value || null;
+                    if (!project_id) {
+                        showToast('Выберите проект для возврата', 'error');
+                        return;
+                    }
+                    if (!description) description = 'Возврат';
+                }
+                if (!description) description = category;
+
+                await API.post('/api/expenses', {
+                    category, description, amount, date, note,
+                    subcategory, explanation, project_id,
+                    is_recurring, recur_interval
+                });
+                if (typeof DraftStore !== 'undefined') DraftStore.clear('new_expense');
                 closeModal();
-                showToast('Расход добавлен', 'success');
+                showToast(is_recurring ? 'Расход добавлен · напоминание за 3 дня' : 'Расход добавлен', 'success');
                 loadData();
             });
         };

@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>День — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=34">
+    <link rel="stylesheet" href="/assets/css/style.css?v=54">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=18"></script>
-    <script src="/assets/js/app.js?v=31"></script>
+    <script src="/assets/js/app.js?v=48"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -65,10 +65,7 @@
         app.innerHTML = renderSidebar('calendar') + renderHeader() + `
             <div class="page-header">
                 <div>
-                    <a href="/pages/calendar.html" class="text-sm text-muted" style="display:inline-flex;align-items:center;gap:4px;margin-bottom:6px;text-decoration:none;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg>
-                        К календарю
-                    </a>
+                    <div id="dayNavTrail"></div>
                     <h1 class="page-title" id="dayTitle">${esc(formatTitle(dateISO))}</h1>
                     <p class="page-subtitle" id="daySub">Подробно по задачам, целям, проектам и дедлайнам</p>
                 </div>
@@ -275,6 +272,25 @@
                 });
             }
 
+            if (selectedTypes.has('deadline')) {
+                goals.forEach(g => {
+                    const end = dayPart(g.date_end);
+                    if (end !== day) return;
+                    const assignees = g.assignees || [];
+                    if (!personMatch(assignees.length ? assignees : [''])) return;
+                    deadlines.push({
+                        id: 'gdl_' + g.id,
+                        kind: 'Дедлайн цели',
+                        name: g.name,
+                        person: assignees.join(', ') || '—',
+                        status: g.status === 'done' ? 'Выполнено' : 'Активна',
+                        urgent: day < today && g.status !== 'done',
+                        date: end,
+                        href: '/pages/goal.html?id=' + g.id
+                    });
+                });
+            }
+
             const projectMap = new Map();
             CRM.getProjects().forEach(p => {
                 const people = [];
@@ -354,16 +370,48 @@
             return { tasks, goalsList, projects, deadlines };
         }
 
-        function blockHtml(title, count, body) {
+        function blockHtml(title, count, body, extraHead) {
             return `
                 <section class="cal-day-block">
                     <div class="cal-day-block-head">
-                        <h2 class="cal-day-block-title">${esc(title)}</h2>
-                        <span class="cal-day-block-count">${count}</span>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <h2 class="cal-day-block-title">${esc(title)}</h2>
+                            ${extraHead || ''}
+                            <span class="cal-day-block-count">${count}</span>
+                        </div>
                     </div>
                     <div class="cal-day-block-body">${body}</div>
                 </section>`;
         }
+
+        let dayNotes = [];
+        async function loadDayNotes() {
+            try {
+                dayNotes = await API.get('/api/reminders?date=' + encodeURIComponent(dateISO)) || [];
+            } catch (e) {
+                dayNotes = [];
+            }
+        }
+
+        window.showNewNoteReminderModal = function(defaultDate) {
+            showNoteReminderModal({
+                date: defaultDate || dateISO,
+                onCreated: async () => {
+                    await loadDayNotes();
+                    renderDay();
+                }
+            });
+        };
+
+        window.dismissDayNote = async function(id) {
+            try {
+                await API.put('/api/reminders/' + id + '/sent');
+                await loadDayNotes();
+                renderDay();
+            } catch (e) {
+                showToast('Ошибка', 'error');
+            }
+        };
 
         function emptyRow(text) {
             return `<div class="cal-day-empty-msg">${esc(text)}</div>`;
@@ -457,6 +505,24 @@
                 parts.push(blockHtml('Дедлайны', data.deadlines.length, body));
             }
 
+            // Personal note reminders for this day
+            const remAdd = `<button type="button" class="btn btn-ghost btn-sm" onclick="showNewNoteReminderModal('${esc(dateISO)}')" title="Добавить" aria-label="Добавить" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</button>`;
+            const remBody = dayNotes.length ? dayNotes.map(r => {
+                const text = (typeof renderDescClamp === 'function')
+                    ? renderDescClamp(r.message, { lines: 4, id: 'cdn_' + r.id })
+                    : esc(String(r.message || '').replace(/<[^>]+>/g, ''));
+                const meta = (typeof formatNoteReminderMeta === 'function') ? formatNoteReminderMeta(r) : '';
+                return `
+                <div class="cal-day-item" style="cursor:default;">
+                    <div class="cal-day-item-main">
+                        <div class="cal-day-item-title rich-content" style="font-weight:500;">${text}</div>
+                        <div class="cal-day-item-meta">${metaChip('Напоминание')}${meta ? metaChip(meta) : ''}</div>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-ghost" onclick="dismissDayNote(${r.id})" title="Готово" aria-label="Готово">✓</button>
+                </div>`;
+            }).join('') : emptyRow('Нет напоминаний на этот день');
+            parts.push(blockHtml('Напоминания', dayNotes.length, remBody, remAdd));
+
             if (!parts.length) {
                 root.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:40px;"><p class="text-muted">Включите типы в фильтре «Отображение»</p></div></div>';
                 return;
@@ -464,10 +530,19 @@
             root.innerHTML = parts.join('');
         }
 
-        function goTo(iso) {
+        function paintTrail() {
+            const el = document.getElementById('dayNavTrail');
+            if (el && typeof NavTrail !== 'undefined') {
+                el.innerHTML = NavTrail.render(formatTitle(dateISO));
+            }
+        }
+
+        async function goTo(iso) {
             dateISO = iso;
             history.replaceState(null, '', '/pages/calendar-day.html?date=' + encodeURIComponent(dateISO));
+            await loadDayNotes();
             renderDay();
+            paintTrail();
         }
 
         document.getElementById('dayPrev').onclick = () => goTo(shiftDate(dateISO, -1));
@@ -477,7 +552,9 @@
         renderPersonMenu();
         renderTypeMenu();
         updateFilterBtnLabels();
+        await loadDayNotes();
         renderDay();
+        paintTrail();
     })();
     </script>
 </body>

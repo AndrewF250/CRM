@@ -4,14 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Настройки — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=16">
+    <link rel="stylesheet" href="/assets/css/style.css?v=56">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=11"></script>
-    <script src="/assets/js/app.js?v=16"></script>
+    <script src="/assets/js/api.js?v=24"></script>
+    <script src="/assets/js/app.js?v=51"></script>
+    <script src="/assets/js/dashboard-board.js?v=5"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -43,7 +44,7 @@
                                 </div>
                             </div>
                             <div class="form-group"><label class="form-label" for="settingsName">Имя</label><input type="text" class="form-input" id="settingsName" value="${user?.name || ''}"></div>
-                            <div class="form-group"><label class="form-label" for="settingsUsername">Логин</label><input type="text" class="form-input" id="settingsUsername" value="${user?.username || ''}" readonly style="opacity:0.6;cursor:not-allowed;"></div>
+                            <div class="form-group"><label class="form-label" for="settingsUsername">Логин</label><input type="text" class="form-input" id="settingsUsername" value="${user?.username || ''}"></div>
                             <div class="form-group"><label class="form-label">Роль</label><input type="text" class="form-input" value="${user?.role === 'admin' ? 'Администратор' : 'Менеджер'}" readonly style="opacity:0.6;cursor:not-allowed;"></div>
                             <button class="btn btn-primary" onclick="saveProfile()">Сохранить изменения</button>
                         </div>
@@ -89,12 +90,25 @@
                         </div>
                     </div>
                     <div class="card">
+                        <div class="card-header"><h3 class="card-title">Дашборд</h3></div>
+                        <div class="card-body">
+                            <p class="text-muted text-sm" style="margin-bottom:14px;">Сохраните раскладку дашборда в файл или загрузите чужой конфиг.</p>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-primary" onclick="saveDashConfig()">Сохранить конфиг</button>
+                                <button type="button" class="btn btn-secondary" onclick="document.getElementById('dashConfigFile').click()">Загрузить конфиг</button>
+                                <input type="file" id="dashConfigFile" accept="application/json,.json" hidden>
+                            </div>
+                            <p class="text-muted text-sm" id="dashConfigHint" style="margin-top:12px;">Файл проверяется: лишние поля и неверный формат отклоняются.</p>
+                        </div>
+                    </div>
+                    <div class="card">
                         <div class="card-header"><h3 class="card-title">Уведомления</h3></div>
                         <div class="card-body">
                             <div style="display:flex;flex-direction:column;gap:14px;">
-                                <label class="form-check"><input type="checkbox" checked id="notifReminders"> Напоминания об оплате</label>
-                                <label class="form-check"><input type="checkbox" checked id="notifDeadlines"> Дедлайны задач</label>
-                                <label class="form-check"><input type="checkbox" checked id="notifOverdue"> Просроченные задачи</label>
+                                <label class="form-check" title="Расходы и платежи за 3 дня до даты"><input type="checkbox" checked id="notifReminders"> Напоминания об оплате</label>
+                                <label class="form-check" title="За 7 дней до дедлайна задачи или проекта"><input type="checkbox" checked id="notifDeadlineWeek"> За неделю до дедлайна (задачи и проекты)</label>
+                                <label class="form-check" title="За 1 день до дедлайна задачи или проекта"><input type="checkbox" checked id="notifDeadlineDay"> За 1 день до дедлайна (задачи и проекты)</label>
+                                <label class="form-check" title="Когда дедлайн уже прошёл"><input type="checkbox" checked id="notifOverdue"> Просроченные задачи и проекты</label>
                             </div>
                             <button class="btn btn-primary" style="margin-top:16px;" onclick="saveNotifSettings()">Сохранить</button>
                         </div>
@@ -156,23 +170,43 @@
             document.getElementById('statOverdue').textContent = stats.overdueTasks || 0;
         } catch (e) {}
 
-        // Load notification settings
-        const notifSettings = JSON.parse(localStorage.getItem('crm_notif_settings') || '{}');
-        if (notifSettings.reminders === false) document.getElementById('notifReminders').checked = false;
-        if (notifSettings.deadlines === false) document.getElementById('notifDeadlines').checked = false;
-        if (notifSettings.overdue === false) document.getElementById('notifOverdue').checked = false;
+        // Load notification settings from server (fallback localStorage)
+        try {
+            const me = await API.checkAuth();
+            if (me) {
+                API.saveUser({ ...API.getCurrentUser(), ...me });
+                document.getElementById('settingsName').value = me.name || '';
+                document.getElementById('settingsUsername').value = me.username || '';
+                document.getElementById('profileAvatar').textContent = me.avatar || '';
+                document.getElementById('profileNameDisplay').textContent = me.name || '';
+                document.getElementById('notifReminders').checked = me.notif_reminders !== false;
+                document.getElementById('notifDeadlineWeek').checked = me.notif_deadline_week !== false;
+                document.getElementById('notifDeadlineDay').checked = me.notif_deadline_day !== false;
+                document.getElementById('notifOverdue').checked = me.notif_overdue !== false;
+            }
+        } catch (e) {
+            const notifSettings = JSON.parse(localStorage.getItem('crm_notif_settings') || '{}');
+            if (notifSettings.reminders === false) document.getElementById('notifReminders').checked = false;
+            if (notifSettings.deadline_week === false || notifSettings.deadlines === false) document.getElementById('notifDeadlineWeek').checked = false;
+            if (notifSettings.deadline_day === false || notifSettings.deadlines === false) document.getElementById('notifDeadlineDay').checked = false;
+            if (notifSettings.overdue === false) document.getElementById('notifOverdue').checked = false;
+        }
 
-        // Save profile
-        window.saveProfile = function() {
+        // Save profile → DB
+        window.saveProfile = async function() {
             const name = document.getElementById('settingsName').value.trim();
+            const username = document.getElementById('settingsUsername').value.trim();
             if (!name) { showToast('Введите имя', 'error'); return; }
-            const user = API.getCurrentUser();
-            user.name = name;
-            user.avatar = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-            API.saveUser(user);
-            document.getElementById('profileAvatar').textContent = user.avatar;
-            document.getElementById('profileNameDisplay').textContent = name;
-            showToast('Профиль обновлён', 'success');
+            if (!username) { showToast('Введите логин', 'error'); return; }
+            try {
+                const updated = await API.put('/users/me', { name, username });
+                API.saveUser({ ...API.getCurrentUser(), ...updated });
+                document.getElementById('profileAvatar').textContent = updated.avatar || '';
+                document.getElementById('profileNameDisplay').textContent = updated.name || name;
+                showToast('Профиль сохранён в БД', 'success');
+            } catch (e) {
+                showToast(e.message || 'Ошибка сохранения', 'error');
+            }
         };
 
         // Theme
@@ -187,18 +221,78 @@
             location.reload();
         };
 
-        // Notification settings
-        window.saveNotifSettings = function() {
-            const settings = {
-                reminders: document.getElementById('notifReminders').checked,
-                deadlines: document.getElementById('notifDeadlines').checked,
-                overdue: document.getElementById('notifOverdue').checked
-            };
-            localStorage.setItem('crm_notif_settings', JSON.stringify(settings));
-            showToast('Настройки уведомлений сохранены', 'success');
+        // Dashboard config export / import (validated)
+        window.saveDashConfig = function() {
+            try {
+                const json = DashBoard.exportConfig(user);
+                const blob = new Blob([json], { type: 'application/json' });
+                const a = document.createElement('a');
+                const stamp = new Date().toISOString().slice(0, 10);
+                a.href = URL.createObjectURL(blob);
+                a.download = 'crm-dashboard-' + stamp + '.json';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showToast('Конфиг дашборда сохранён', 'success');
+            } catch (e) {
+                showToast('Ошибка сохранения: ' + (e.message || e), 'error');
+            }
         };
 
-        // Change password
+        document.getElementById('dashConfigFile')?.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            if (file.size > 200000) {
+                showToast('Файл слишком большой', 'error');
+                return;
+            }
+            if (file.type && file.type !== 'application/json' && !file.name.endsWith('.json')) {
+                showToast('Нужен JSON-файл конфига', 'error');
+                return;
+            }
+            try {
+                const text = await file.text();
+                const res = DashBoard.importConfig(user, text);
+                if (!res.ok) {
+                    showToast('Файл отклонён: ' + res.error, 'error');
+                    const hint = document.getElementById('dashConfigHint');
+                    if (hint) hint.textContent = 'Ошибка: ' + res.error;
+                    return;
+                }
+                showToast('Конфиг загружен · откройте дашборд', 'success');
+                const hint = document.getElementById('dashConfigHint');
+                if (hint) hint.textContent = 'Загружено блоков: ' + res.config.widgets.length;
+            } catch (err) {
+                showToast('Не удалось прочитать файл', 'error');
+            }
+        });
+
+        // Notification settings → DB
+        window.saveNotifSettings = async function() {
+            const settings = {
+                notif_reminders: document.getElementById('notifReminders').checked,
+                notif_deadline_week: document.getElementById('notifDeadlineWeek').checked,
+                notif_deadline_day: document.getElementById('notifDeadlineDay').checked,
+                notif_overdue: document.getElementById('notifOverdue').checked
+            };
+            settings.notif_deadlines = settings.notif_deadline_week || settings.notif_deadline_day;
+            try {
+                const updated = await API.put('/users/me', settings);
+                API.saveUser({ ...API.getCurrentUser(), ...updated });
+                localStorage.setItem('crm_notif_settings', JSON.stringify({
+                    reminders: settings.notif_reminders,
+                    deadline_week: settings.notif_deadline_week,
+                    deadline_day: settings.notif_deadline_day,
+                    deadlines: settings.notif_deadlines,
+                    overdue: settings.notif_overdue
+                }));
+                showToast('Уведомления сохранены', 'success');
+            } catch (e) {
+                showToast(e.message || 'Ошибка сохранения', 'error');
+            }
+        };
+
+        // Change password → DB + bcrypt
         window.changePassword = async function() {
             const current = document.getElementById('currentPassword').value;
             const newPass = document.getElementById('newPassword').value;
@@ -208,15 +302,15 @@
             if (newPass.length < 6) { showToast('Пароль минимум 6 символов', 'error'); return; }
             if (newPass !== confirm) { showToast('Пароли не совпадают', 'error'); return; }
 
-            const user = API.getCurrentUser();
-            if (current !== user.password) { showToast('Неверный текущий пароль', 'error'); return; }
-
-            user.password = newPass;
-            API.saveUser(user);
-            document.getElementById('currentPassword').value = '';
-            document.getElementById('newPassword').value = '';
-            document.getElementById('confirmPassword').value = '';
-            showToast('Пароль изменён', 'success');
+            try {
+                await API.put('/users/me/password', { current_password: current, new_password: newPass });
+                document.getElementById('currentPassword').value = '';
+                document.getElementById('newPassword').value = '';
+                document.getElementById('confirmPassword').value = '';
+                showToast('Пароль изменён', 'success');
+            } catch (e) {
+                showToast(e.message || 'Ошибка смены пароля', 'error');
+            }
         };
 
         // ===== TEAM =====

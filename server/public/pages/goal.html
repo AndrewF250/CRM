@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Цель — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=30">
+    <link rel="stylesheet" href="/assets/css/style.css?v=54">
     <style>
         .goal-stat-card { position: relative; }
         .goal-stat-card .edit-pencil {
@@ -30,7 +30,7 @@
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=17"></script>
-    <script src="/assets/js/app.js?v=30"></script>
+    <script src="/assets/js/app.js?v=48"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
@@ -103,13 +103,7 @@
             const assignees = goal.assignees || [];
 
             document.getElementById('goalContent').innerHTML = `
-                <div style="margin-bottom:12px;">
-                    <a href="/pages/goals.html" class="text-sm text-muted" style="display:inline-flex;align-items:center;gap:4px;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Цели
-                    </a>
-                    <span class="text-sm text-muted" style="margin:0 8px;">/</span>
-                    <span class="text-sm fw-600">${escapeHtml(goal.name)}</span>
-                </div>
+                ${typeof NavTrail !== 'undefined' ? NavTrail.render(goal.name) : ''}
 
                 <div class="page-header">
                     <div style="flex:1;min-width:0;">

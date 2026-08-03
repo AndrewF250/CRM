@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Календарь — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=33">
+    <link rel="stylesheet" href="/assets/css/style.css?v=54">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=18"></script>
-    <script src="/assets/js/app.js?v=31"></script>
+    <script src="/assets/js/app.js?v=48"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -362,8 +362,9 @@
                     });
                 });
             }
-            // Project deadlines
+            // Project + goal deadlines
             if (selectedTypes.has('deadline')) {
+                const todayISO = new Date().toISOString().slice(0, 10);
                 CRM.getProjects().forEach(p => {
                     const people = [];
                     if (p.assignee) people.push(p.assignee);
@@ -383,11 +384,30 @@
                             end: d.day,
                             person: p.assignee || '',
                             done: false,
-                            urgent: d.day < new Date().toISOString().slice(0, 10),
+                            urgent: d.day < todayISO,
                             status: 'Ожидает',
                             time: '',
                             href: '/pages/project.html?id=' + p.id
                         });
+                    });
+                });
+                goals.forEach(g => {
+                    const end = dayPart(g.date_end);
+                    if (!end) return;
+                    const assignees = g.assignees || [];
+                    if (!personMatch(assignees.length ? assignees : [''])) return;
+                    events.push({
+                        id: 'gdl_' + g.id + '_' + end,
+                        type: 'deadline',
+                        name: 'Дедлайн цели: ' + g.name,
+                        start: end,
+                        end: end,
+                        person: assignees.join(', '),
+                        done: g.status === 'done',
+                        urgent: end < todayISO && g.status !== 'done',
+                        status: g.status === 'done' ? 'Готово' : 'Ожидает',
+                        time: '',
+                        href: '/pages/goal.html?id=' + g.id
                     });
                 });
             }
