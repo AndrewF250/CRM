@@ -9,3 +9,6 @@ server/.vault-key
 server/data/
 server/_debug_*
 server/_seed_*
+.deploy-askpass.bat
+.deploy-askpass.sh
+check.sh
