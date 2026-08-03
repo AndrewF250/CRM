@@ -129,6 +129,9 @@ rsync -a --delete \\
   --exclude 'crm.db' --exclude 'crm.db-*' --exclude 'uploads/' --exclude 'node_modules/' \\
   --exclude '.vault-key' --exclude '*.db-wal' --exclude '*.db-shm' \\
   "$TMP/server/" "$APP_DIR/"
+# Product version lives in repo root
+if [ -f "$TMP/VERSION" ]; then cp -f "$TMP/VERSION" "$APP_DIR/VERSION"; cp -f "$TMP/VERSION" "$(dirname "$APP_DIR")/VERSION" 2>/dev/null || true; fi
+if [ -f "$TMP/CHANGELOG.md" ]; then cp -f "$TMP/CHANGELOG.md" "$APP_DIR/CHANGELOG.md"; fi
 cd "$APP_DIR"
 npm install --omit=dev
 # Health: can node load database module?
