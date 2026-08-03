@@ -4,41 +4,53 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Интеграции — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=56">
+    <link rel="stylesheet" href="/assets/css/style.css?v=59">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=24"></script>
-    <script src="/assets/js/app.js?v=51"></script>
+    <script src="/assets/js/app.js?v=54"></script>
     <script>
     (async function() {
         if (!API.requireAuth()) return;
         const me = API.getCurrentUser();
         const isAdmin = me?.role === 'admin';
+        let rows = [];
+        let lastHealthAt = null;
+        let activeAiId = null;
+        const DOMAIN = 'http://crm-seo-123.xyz/';
 
         const app = document.getElementById('app');
         app.innerHTML = renderSidebar('integrations') + renderHeader() + `
-            <div class="page-header">
-                <div>
-                    <h1 class="page-title">Интеграции <span class="badge badge-gray" id="pageVersionBadge" title="Версия продукта">v…</span></h1>
-                    <p class="page-subtitle">GitHub, SSH-деплой, нейросети. Секреты шифруются на сервере (vault).</p>
+            <div class="int-sticky" id="intSticky">
+                <div class="page-header" style="margin-bottom:8px;">
+                    <div>
+                        <h1 class="page-title">Интеграции <span class="badge badge-gray" id="pageVersionBadge" title="Версия">v…</span></h1>
+                        <p class="page-subtitle tip" data-tip="Публичный адрес CRM" title="${DOMAIN}">${DOMAIN}</p>
+                    </div>
+                    <div class="page-actions" style="align-items:center;">
+                        <span class="int-refresh-meta" id="healthUpdatedAt">ещё не обновляли</span>
+                        <button class="btn btn-secondary tip" id="btnRefreshHealth" data-tip="Обновить health и статусы" title="Обновить" aria-label="Обновить" style="padding:8px 10px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                        </button>
+                    </div>
                 </div>
-                <div class="page-actions">
-                    <button class="btn btn-secondary tip" id="btnRefreshHealth" data-tip="Обновить health и статусы подключений">Обновить</button>
+                <div class="stats-grid" id="healthStats" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));"></div>
+                <div class="int-tabs" id="intTabs">
+                    <button type="button" class="int-tab active" data-target="secGithub">GitHub</button>
+                    <button type="button" class="int-tab" data-target="secServer">Сервер</button>
+                    <button type="button" class="int-tab" data-target="secAi">AI</button>
                 </div>
             </div>
 
-            <div class="stats-grid" id="healthStats" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:20px;"></div>
+            <div id="secGithub" class="int-section"></div>
+            <div id="secServer" class="int-section" style="margin-top:16px;"></div>
+            <div id="secAi" class="int-section" style="margin-top:16px;"></div>
 
-            <div id="deployCards" style="display:grid;gap:16px;margin-bottom:16px;"></div>
-            <div id="aiCards" style="display:grid;gap:16px;margin-bottom:16px;"></div>
-
-            <div class="card" style="margin-bottom:16px;">
-                <div class="card-header">
-                    <h3 class="card-title tip" data-tip="Служебные записи о состоянии CRM, БД и биллинга">Прочие подключения</h3>
-                </div>
+            <div class="card" style="margin-top:16px;margin-bottom:16px;">
+                <div class="card-header"><h3 class="card-title tip" data-tip="Служебные записи CRM">Прочие подключения</h3></div>
                 <div class="card-body" id="integrationsList"><p class="text-muted">Загрузка…</p></div>
             </div>
             </div></div></div>
@@ -47,73 +59,71 @@
         initCommonUI();
 
         function esc(s) { return escapeHtmlText(String(s ?? '')); }
-
         function tipAttr(text) {
             return ` class="tip" data-tip="${esc(text).replace(/"/g, '&quot;')}" title="${esc(text).replace(/"/g, '&quot;')}"`;
         }
-
         function statusPill(status, configured) {
-            if (status === 'ok') {
-                return `<span class="badge badge-success tip" data-tip="Проверка прошла успешно / сервис в порядке">подключено</span>`;
-            }
-            if (status === 'error') {
-                return `<span class="badge badge-danger tip" data-tip="Последняя проверка завершилась ошибкой">ошибка</span>`;
-            }
-            if (configured) {
-                return `<span class="badge badge-warning tip" data-tip="Данные есть, но проверка ещё не пройдена — нажмите «Проверить»">ожидает проверки</span>`;
-            }
-            return `<span class="badge badge-gray tip" data-tip="Не настроено = нет сохранённых секретов/хоста. Заполните поля и сохраните.">не настроено</span>`;
+            if (status === 'ok') return `<span class="badge badge-success tip" data-tip="Подключено / OK">подключено</span>`;
+            if (status === 'error') return `<span class="badge badge-danger tip" data-tip="Ошибка проверки">ошибка</span>`;
+            if (configured) return `<span class="badge badge-warning tip" data-tip="Есть данные, нажмите проверить">ожидает</span>`;
+            return `<span class="badge badge-gray tip" data-tip="Нет сохранённых секретов/хоста">не настроено</span>`;
         }
+        function fmtUpdated(d) {
+            if (!d) return 'ещё не обновляли';
+            const x = new Date(d);
+            const p = n => String(n).padStart(2, '0');
+            return 'обновлено ' + p(x.getHours()) + ':' + p(x.getMinutes()) + ':' + p(x.getSeconds());
+        }
+
+        document.getElementById('intTabs').onclick = (e) => {
+            const tab = e.target.closest('.int-tab');
+            if (!tab) return;
+            document.querySelectorAll('.int-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const el = document.getElementById(tab.dataset.target);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
 
         async function loadHealth() {
             const box = document.getElementById('healthStats');
             try {
                 const h = await API.get('/api/integrations/health');
+                lastHealthAt = Date.now();
+                document.getElementById('healthUpdatedAt').textContent = fmtUpdated(lastHealthAt);
                 const upMin = Math.floor((h.server?.uptimeSec || 0) / 60);
                 const ver = h.version || window.CRM_APP_VERSION || '—';
                 const vb = document.getElementById('pageVersionBadge');
                 if (vb) vb.textContent = 'v' + ver;
-                const okCls = h.ok ? 'stat-ok' : 'stat-fail';
                 box.innerHTML = `
-                    <div class="stat-card ${okCls}"${tipAttr('Общий статус приложения и БД')}>
+                    <div class="stat-card"${tipAttr('Общий статус')}>
                         <div class="stat-info"><div class="stat-label">Состояние</div>
-                        <div class="stat-value" style="font-size:1.1rem;color:${h.ok ? 'var(--success)' : 'var(--danger)'}">${h.ok ? 'OK' : 'FAIL'}</div></div>
+                        <div class="stat-value" style="color:${h.ok ? 'var(--success)' : 'var(--danger)'}">${h.ok ? 'OK' : 'FAIL'}</div></div>
                     </div>
-                    <div class="stat-card"${tipAttr('Версия CRM из файла VERSION')}>
-                        <div class="stat-info"><div class="stat-label">Версия</div>
-                        <div class="stat-value" style="font-size:1.1rem;">${esc(ver)}</div></div>
+                    <div class="stat-card"${tipAttr('Версия CRM')}>
+                        <div class="stat-info"><div class="stat-label">Версия</div><div class="stat-value">${esc(ver)}</div></div>
                     </div>
-                    <div class="stat-card"${tipAttr('Сколько минут работает процесс Node')}>
-                        <div class="stat-info"><div class="stat-label">Uptime</div>
-                        <div class="stat-value" style="font-size:1.1rem;">${upMin} мин</div></div>
+                    <div class="stat-card"${tipAttr('Домен')}>
+                        <div class="stat-info"><div class="stat-label">Домен</div><div class="stat-value" style="font-size:0.85rem !important;">crm-seo-123</div></div>
                     </div>
-                    <div class="stat-card ${h.db?.ok ? 'stat-ok' : 'stat-fail'}"${tipAttr('Доступность SQLite')}>
+                    <div class="stat-card"${tipAttr('Uptime')}>
+                        <div class="stat-info"><div class="stat-label">Uptime</div><div class="stat-value">${upMin}м</div></div>
+                    </div>
+                    <div class="stat-card"${tipAttr('БД')}>
                         <div class="stat-info"><div class="stat-label">БД</div>
-                        <div class="stat-value" style="font-size:1.1rem;color:${h.db?.ok ? 'var(--success)' : 'var(--danger)'}">${h.db?.ok ? 'OK' : 'FAIL'}</div></div>
+                        <div class="stat-value" style="color:${h.db?.ok ? 'var(--success)' : 'var(--danger)'}">${h.db?.ok ? 'OK' : 'FAIL'}</div></div>
                     </div>
-                    <div class="stat-card"${tipAttr('Пользователи в таблице users')}>
-                        <div class="stat-info"><div class="stat-label">Пользователи</div>
-                        <div class="stat-value" style="font-size:1.1rem;">${h.db?.users ?? '—'}</div></div>
+                    <div class="stat-card"${tipAttr('Пользователи')}>
+                        <div class="stat-info"><div class="stat-label">Юзеры</div><div class="stat-value">${h.db?.users ?? '—'}</div></div>
                     </div>
-                    <div class="stat-card"${tipAttr('Всего проектов')}>
-                        <div class="stat-info"><div class="stat-label">Проекты</div>
-                        <div class="stat-value" style="font-size:1.1rem;">${h.db?.projects ?? '—'}</div></div>
+                    <div class="stat-card"${tipAttr('Проекты')}>
+                        <div class="stat-info"><div class="stat-label">Проекты</div><div class="stat-value">${h.db?.projects ?? '—'}</div></div>
                     </div>
-                    <div class="stat-card"${tipAttr('Открытые задачи (не done)')}>
-                        <div class="stat-info"><div class="stat-label">Задачи</div>
-                        <div class="stat-value" style="font-size:1.1rem;">${h.db?.tasksOpen ?? '—'}</div></div>
+                    <div class="stat-card"${tipAttr('Открытые задачи')}>
+                        <div class="stat-info"><div class="stat-label">Задачи</div><div class="stat-value">${h.db?.tasksOpen ?? '—'}</div></div>
                     </div>
-                    <div class="stat-card"${tipAttr('Страницы и файлы wiki/документов')}>
-                        <div class="stat-info"><div class="stat-label">Документы</div>
-                        <div class="stat-value" style="font-size:1.1rem;">${h.db?.wiki ?? '—'}</div></div>
-                    </div>
-                    <div class="stat-card"${tipAttr('Сколько интеграций в статусе OK')}>
-                        <div class="stat-info"><div class="stat-label">Интеграции OK</div>
-                        <div class="stat-value" style="font-size:1.1rem;color:var(--success);">${h.integrations?.ok ?? 0}/${h.integrations?.total ?? 0}</div></div>
-                    </div>
-                    <div class="stat-card"${tipAttr('Версия Node.js на сервере')}>
-                        <div class="stat-info"><div class="stat-label">Node</div>
-                        <div class="stat-value" style="font-size:0.95rem;">${esc((h.server?.node || '').replace('v',''))}</div></div>
+                    <div class="stat-card"${tipAttr('Интеграции OK')}>
+                        <div class="stat-info"><div class="stat-label">Интегр.</div>
+                        <div class="stat-value" style="color:var(--success);">${h.integrations?.ok ?? 0}/${h.integrations?.total ?? 0}</div></div>
                     </div>
                 `;
             } catch (e) {
@@ -121,159 +131,206 @@
             }
         }
 
-        let rows = [];
-
-        function renderDeployCards() {
-            const box = document.getElementById('deployCards');
+        function renderGithub() {
             const gh = rows.find(r => r.type === 'github');
-            const ssh = rows.find(r => r.type === 'ssh_deploy' || r.type === 'server_ssh');
-            let html = '';
-
-            if (gh) {
-                const c = gh.config || {};
-                html += `
-                <div class="card">
-                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-                        <h3 class="card-title tip" data-tip="Репозиторий, откуда сервер тянет код при деплое">GitHub</h3>
-                        ${statusPill(gh.status, gh.configured)}
+            const box = document.getElementById('secGithub');
+            if (!gh) { box.innerHTML = '<p class="text-muted">Нет GitHub</p>'; return; }
+            const c = gh.config || {};
+            box.innerHTML = `
+            <div class="card">
+                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 class="card-title tip" data-tip="Репозиторий для деплоя">GitHub</h3>
+                    ${statusPill(gh.status, gh.configured)}
+                </div>
+                <div class="card-body">
+                    <div class="grid-2">
+                        <div class="form-group"><label class="form-label tip" data-tip="URL репозитория">Repo URL</label>
+                            <input class="form-input" id="ghRepo" value="${esc(c.repoUrl || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Ветка">Branch</label>
+                            <input class="form-input" id="ghBranch" value="${esc(c.branch || 'main')}" ${isAdmin ? '' : 'readonly'}></div>
                     </div>
-                    <div class="card-body">
-                        <p class="text-sm text-muted" style="margin:0 0 12px;">
-                            ${gh.configured ? '<span style="color:var(--success)">Есть конфиг</span>' : 'Нет подключения'} · token: ${c.has_token ? 'есть' : 'нет'}
-                            ${gh.last_error ? `<br><span style="color:var(--danger);">${esc(gh.last_error)}</span>` : ''}
-                        </p>
-                        <div class="grid-2">
-                            <div class="form-group"><label class="form-label tip" data-tip="HTTPS URL репозитория">Repo URL</label>
-                                <input class="form-input" id="ghRepo" value="${esc(c.repoUrl || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Ветка для clone (обычно main)">Branch</label>
-                                <input class="form-input" id="ghBranch" value="${esc(c.branch || 'main')}" ${isAdmin ? '' : 'readonly'}></div>
-                        </div>
-                        <div class="form-group"><label class="form-label tip" data-tip="Нужен для private-репо. Хранится в vault, в UI не показывается.">GitHub token</label>
-                            <input class="form-input" id="ghToken" type="password" placeholder="${c.has_token ? '•••• сохранён' : 'ghp_…'}" ${isAdmin ? '' : 'readonly'}></div>
-                        ${isAdmin ? `<div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            <button class="btn btn-primary tip" data-tip="Сохранить URL/ветку/token в БД (шифр)" onclick="saveGithub(${gh.id})">Сохранить</button>
-                            <button class="btn btn-secondary tip" data-tip="Проверить, что конфиг заполнен" onclick="testIntegration(${gh.id})">Проверить</button>
-                        </div>` : '<p class="text-muted text-sm">Только admin</p>'}
-                    </div>
-                </div>`;
-            }
-
-            if (ssh) {
-                const c = ssh.config || {};
-                const auto = !!(ssh.meta && ssh.meta.auto_connect);
-                html += `
-                <div class="card">
-                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-                        <h3 class="card-title tip" data-tip="SSH на прод: деплой кода, копия и откат БД">Сервер (SSH)</h3>
-                        ${statusPill(ssh.status, ssh.configured)}
-                    </div>
-                    <div class="card-body">
-                        <p class="text-sm text-muted" style="margin:0 0 12px;">
-                            ${c.host && c.has_password ? '<span style="color:var(--success)">SSH сохранён</span>' : 'Нет полного подключения'} · password: ${c.has_password ? 'есть' : 'нет'}
-                            ${ssh.last_check ? ' · ' + esc(String(ssh.last_check).slice(0, 16)) : ''}
-                            ${ssh.last_error ? `<br><span style="color:var(--danger);">${esc(ssh.last_error)}</span>` : ''}
-                        </p>
-                        <div class="grid-2">
-                            <div class="form-group"><label class="form-label tip" data-tip="IP или домен сервера">Host</label>
-                                <input class="form-input" id="sshHost" value="${esc(c.host || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Порт SSH, обычно 22">Port</label>
-                                <input class="form-input" id="sshPort" value="${esc(c.port || 22)}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Логин SSH (часто root)">Username</label>
-                                <input class="form-input" id="sshUser" value="${esc(c.username || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Пароль шифруется vault на сервере CRM">Password</label>
-                                <input class="form-input" id="sshPass" type="password" placeholder="${c.has_password ? '•••• сохранён' : 'пароль SSH'}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Папка с server.js на проде">App dir</label>
-                                <input class="form-input" id="sshApp" value="${esc(c.appDir || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Куда класть crm.db.prev и before-deploy">Backup dir</label>
-                                <input class="form-input" id="sshBackup" value="${esc(c.backupDir || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                        </div>
-                        ${isAdmin ? `
-                        <label class="form-check tip" data-tip="При открытии этой страницы сразу проверять SSH и сохранять статус" style="margin-bottom:14px;">
-                            <input type="checkbox" id="sshAutoConnect" ${auto ? 'checked' : ''}> Сохранять и подключать автоматически
-                        </label>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-                            <button class="btn btn-primary tip" data-tip="Записать SSH в vault + meta" onclick="saveSsh(${ssh.id})">Сохранить</button>
-                            <button class="btn btn-secondary tip" data-tip="Проверить SSH: echo OK + hostname" onclick="testIntegration(${ssh.id})">Проверить SSH</button>
-                            <button class="btn btn-secondary tip" data-tip="Шаг 1 деплоя: копия crm.db → backups" onclick="runBackup(${ssh.id})">Копия БД</button>
-                            <button class="btn btn-primary tip" data-tip="1) бэкап БД 2) git clone 3) rsync без БД 4) npm 5) миграции 6) health; при FAIL — откат prev" onclick="runDeploy(${ssh.id})">Деплой с GitHub</button>
-                        </div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            <button class="btn btn-secondary tip" data-tip="Вернуть crm.db.prev как текущую БД и перезапустить pm2" onclick="runRestore(${ssh.id})">Откатить БД (prev)</button>
-                            <button class="btn btn-danger tip" data-tip="То же, что откат: оставить только старую БД, новую отбросить" onclick="runKeepOld(${ssh.id})">Оставить только старую БД</button>
-                        </div>
-                        <pre id="deployLog" class="text-sm" style="margin-top:14px;max-height:220px;overflow:auto;background:var(--gray-50);padding:12px;border-radius:8px;white-space:pre-wrap;"></pre>
-                        ` : '<p class="text-muted text-sm">Только admin</p>'}
-                    </div>
-                </div>`;
-            }
-
-            box.innerHTML = html || '<p class="text-muted">Нет GitHub / SSH — перезапустите сервер</p>';
+                    <div class="form-group"><label class="form-label tip" data-tip="Token для private">GitHub token</label>
+                        <input class="form-input" id="ghToken" type="password" placeholder="${c.has_token ? '•••• сохранён' : 'ghp_…'}" ${isAdmin ? '' : 'readonly'}></div>
+                    ${isAdmin ? `<div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-primary tip" data-tip="Сохранить в vault" onclick="saveGithub(${gh.id})">Сохранить</button>
+                        <button class="btn btn-secondary tip" data-tip="Проверить конфиг" onclick="testIntegration(${gh.id})">Проверить</button>
+                    </div>` : ''}
+                </div>
+            </div>`;
         }
 
-        function renderAiCards() {
-            const box = document.getElementById('aiCards');
+        function renderServer() {
+            const ssh = rows.find(r => r.type === 'ssh_deploy' || r.type === 'server_ssh');
+            const box = document.getElementById('secServer');
+            if (!ssh) { box.innerHTML = '<p class="text-muted">Нет SSH</p>'; return; }
+            const c = ssh.config || {};
+            const auto = !!(ssh.meta && ssh.meta.auto_connect);
+            box.innerHTML = `
+            <div class="card">
+                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3 class="card-title tip" data-tip="SSH деплой на прод">Сервер (SSH)</h3>
+                    ${statusPill(ssh.status, ssh.configured)}
+                </div>
+                <div class="card-body">
+                    <p class="text-sm text-muted tip" data-tip="Публичный домен CRM" style="margin:0 0 12px;">
+                        Домен: <a href="${DOMAIN}" target="_blank" rel="noopener">${DOMAIN}</a>
+                    </p>
+                    <div class="grid-2">
+                        <div class="form-group"><label class="form-label tip" data-tip="IP/хост">Host</label>
+                            <input class="form-input" id="sshHost" value="${esc(c.host || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Порт SSH">Port</label>
+                            <input class="form-input" id="sshPort" value="${esc(c.port || 22)}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Логин">Username</label>
+                            <input class="form-input" id="sshUser" value="${esc(c.username || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Пароль в vault">Password</label>
+                            <input class="form-input" id="sshPass" type="password" placeholder="${c.has_password ? '•••• сохранён' : 'пароль'}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Папка приложения">App dir</label>
+                            <input class="form-input" id="sshApp" value="${esc(c.appDir || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Папка бэкапов">Backup dir</label>
+                            <input class="form-input" id="sshBackup" value="${esc(c.backupDir || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                    </div>
+                    ${isAdmin ? `
+                    <label class="form-check tip" data-tip="При открытии страницы сразу проверять SSH" style="margin-bottom:12px;">
+                        <input type="checkbox" id="sshAutoConnect" ${auto ? 'checked' : ''}> Сохранять и подключать автоматически
+                    </label>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                        <button class="btn btn-primary tip" data-tip="Сохранить SSH" onclick="saveSsh(${ssh.id})">Сохранить</button>
+                        <button class="btn btn-secondary tip" data-tip="Проверить SSH" onclick="testIntegration(${ssh.id})">Проверить SSH</button>
+                        <button class="btn btn-secondary tip" data-tip="Копия БД перед деплоем" onclick="runBackup(${ssh.id})">Копия БД</button>
+                        <button class="btn btn-primary tip" data-tip="Деплой с GitHub + миграции БД" onclick="runDeploy(${ssh.id})">Деплой с GitHub</button>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-secondary tip" data-tip="Откатить к prev" onclick="runRestore(${ssh.id})">Откатить БД</button>
+                        <button class="btn btn-danger tip" data-tip="Оставить только старую БД" onclick="runKeepOld(${ssh.id})">Оставить старую БД</button>
+                    </div>
+                    <pre id="deployLog" class="text-sm" style="margin-top:14px;max-height:200px;overflow:auto;background:var(--gray-50);padding:12px;border-radius:8px;white-space:pre-wrap;"></pre>
+                    ` : ''}
+                </div>
+            </div>`;
+        }
+
+        function renderAi() {
+            const box = document.getElementById('secAi');
             const ais = rows.filter(r => String(r.type || '').startsWith('ai_'));
-            if (!ais.length) { box.innerHTML = ''; return; }
-            box.innerHTML = ais.map(r => {
-                const m = r.meta || {};
-                const c = r.config || {};
-                return `
-                <div class="card">
-                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-                        <h3 class="card-title tip" data-tip="${esc(m.label || 'Учёт токенов и тарифа нейросети')}">${esc(r.name)}</h3>
-                        ${statusPill(r.status, r.configured || c.has_api_key)}
+            if (!ais.length) {
+                box.innerHTML = '<div class="card"><div class="card-body"><p class="text-muted">Нет AI</p>' +
+                    (isAdmin ? '<button class="btn btn-primary" onclick="addAi()">+ Добавить</button>' : '') + '</div></div>';
+                return;
+            }
+            if (!activeAiId || !ais.some(a => a.id === activeAiId)) activeAiId = ais[0].id;
+            const active = ais.find(a => a.id === activeAiId) || ais[0];
+            const m = active.meta || {};
+            const c = active.config || {};
+
+            const tabs = ais.map(a => `
+                <div class="int-ai-tab${a.id === activeAiId ? ' active' : ''}" data-ai="${a.id}">
+                    <span class="ai-tab-label tip" data-tip="Двойной клик — переименовать" data-id="${a.id}">${esc(a.name)}</span>
+                    ${isAdmin && a.type !== 'ai_openai' && a.type !== 'ai_claude' ? `<button type="button" class="btn btn-ghost btn-sm tip" data-tip="Удалить" data-del-ai="${a.id}" style="padding:0 4px;color:var(--danger);">&times;</button>` : ''}
+                </div>`).join('');
+
+            box.innerHTML = `
+            <div class="card">
+                <div class="card-body">
+                    <div class="int-ai-tabs">
+                        ${tabs}
+                        ${isAdmin ? `<button type="button" class="int-ai-add tip" data-tip="Добавить нейронку" onclick="addAi()">+</button>` : ''}
                     </div>
-                    <div class="card-body">
-                        <div class="grid-2">
-                            <div class="form-group"><label class="form-label tip" data-tip="Сколько токенов уже потрачено (вручную или из API позже)">Токенов использовано</label>
-                                <input class="form-input ai-field" data-id="${r.id}" data-k="tokens_used" type="number" value="${esc(m.tokens_used || 0)}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Лимит тарифа в токенах (0 = не задан)">Лимит токенов</label>
-                                <input class="form-input ai-field" data-id="${r.id}" data-k="tokens_limit" type="number" value="${esc(m.tokens_limit || 0)}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Когда купили / активировали тариф">Дата покупки</label>
-                                <input class="form-input ai-field" data-id="${r.id}" data-k="purchase_date" type="date" value="${esc(m.purchase_date || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Когда продлевается / обновляется тариф">Дата обновления тарифа</label>
-                                <input class="form-input ai-field" data-id="${r.id}" data-k="renew_date" type="date" value="${esc(m.renew_date || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="Название плана: Plus, Team, API tier…">Тариф</label>
-                                <input class="form-input ai-field" data-id="${r.id}" data-k="tariff" value="${esc(m.tariff || '')}" ${isAdmin ? '' : 'readonly'}></div>
-                            <div class="form-group"><label class="form-label tip" data-tip="API key в vault (для будущего автосбора расхода)">API key</label>
-                                <input class="form-input" id="aiKey_${r.id}" type="password" placeholder="${c.has_api_key ? '•••• сохранён' : 'sk-…'}" ${isAdmin ? '' : 'readonly'}></div>
-                        </div>
-                        ${isAdmin ? `<button class="btn btn-primary tip" data-tip="Сохранить учёт токенов и ключ" onclick="saveAi(${r.id})">Сохранить</button>` : ''}
+                    <div class="grid-2">
+                        <div class="form-group"><label class="form-label tip" data-tip="Токены использовано">Токенов использовано</label>
+                            <input class="form-input ai-field" data-k="tokens_used" type="number" value="${esc(m.tokens_used || 0)}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Лимит тарифа">Лимит токенов</label>
+                            <input class="form-input ai-field" data-k="tokens_limit" type="number" value="${esc(m.tokens_limit || 0)}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Дата покупки">Дата покупки</label>
+                            <input class="form-input ai-field" data-k="purchase_date" type="date" value="${esc(m.purchase_date || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Обновление тарифа">Дата обновления тарифа</label>
+                            <input class="form-input ai-field" data-k="renew_date" type="date" value="${esc(m.renew_date || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="Название тарифа">Тариф</label>
+                            <input class="form-input ai-field" data-k="tariff" value="${esc(m.tariff || '')}" ${isAdmin ? '' : 'readonly'}></div>
+                        <div class="form-group"><label class="form-label tip" data-tip="API key в vault">API key</label>
+                            <input class="form-input" id="aiKeyActive" type="password" placeholder="${c.has_api_key ? '•••• сохранён' : 'sk-…'}" ${isAdmin ? '' : 'readonly'}></div>
                     </div>
-                </div>`;
-            }).join('');
+                    ${isAdmin ? `<button class="btn btn-primary tip" data-tip="Сохранить AI" onclick="saveAiActive()">Сохранить</button>` : ''}
+                </div>
+            </div>`;
+
+            box.querySelectorAll('.int-ai-tab[data-ai]').forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    if (e.target.closest('[data-del-ai]') || e.target.closest('input')) return;
+                    activeAiId = Number(tab.dataset.ai);
+                    renderAi();
+                });
+            });
+            box.querySelectorAll('[data-del-ai]').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (!confirm('Удалить нейронку?')) return;
+                    try {
+                        await API.delete('/api/integrations/' + btn.dataset.delAi);
+                        showToast('Удалено', 'success');
+                        await loadIntegrations();
+                    } catch (err) { showToast(err.message || 'Ошибка', 'error'); }
+                });
+            });
+            box.querySelectorAll('.ai-tab-label').forEach(label => {
+                label.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    if (!isAdmin) return;
+                    const id = Number(label.dataset.id);
+                    const row = ais.find(a => a.id === id);
+                    if (!row) return;
+                    const input = document.createElement('input');
+                    input.value = row.name;
+                    input.className = 'form-input';
+                    input.style.cssText = 'width:140px;padding:2px 6px;font-size:0.85rem;';
+                    label.replaceWith(input);
+                    input.focus();
+                    input.select();
+                    const commit = async () => {
+                        const name = input.value.trim();
+                        if (!name || name === row.name) { renderAi(); return; }
+                        try {
+                            await API.put('/api/integrations/' + id, { name });
+                            showToast('Переименовано', 'success');
+                            await loadIntegrations();
+                        } catch (err) {
+                            showToast(err.message || 'Ошибка', 'error');
+                            renderAi();
+                        }
+                    };
+                    input.addEventListener('blur', commit);
+                    input.addEventListener('keydown', (ev) => {
+                        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+                        if (ev.key === 'Escape') renderAi();
+                    });
+                });
+            });
         }
 
         const OTHER_HELP = {
-            server: 'Текущий процесс CRM (этот хост). Статус OK = приложение отвечает.',
-            database: 'Файл SQLite crm.db. Хранит проекты, задачи, пользователей.',
-            subscription: 'Заготовка под биллинг хостинга/домена — подключим позже.'
+            server: 'Текущий процесс CRM',
+            database: 'SQLite crm.db',
+            subscription: 'Биллинг хостинга/домена',
+            domain: 'Публичный домен CRM'
         };
 
         async function loadIntegrations() {
             const list = document.getElementById('integrationsList');
             try {
                 rows = await API.get('/api/integrations') || [];
-                renderDeployCards();
-                renderAiCards();
+                renderGithub();
+                renderServer();
+                renderAi();
                 const other = rows.filter(r => !['github', 'ssh_deploy', 'server_ssh'].includes(r.type) && !String(r.type).startsWith('ai_'));
-                if (!other.length) {
-                    list.innerHTML = '<p class="text-muted">Нет дополнительных записей</p>';
-                    return;
-                }
                 list.innerHTML = other.map(r => {
-                    const help = OTHER_HELP[r.type] || (r.meta && r.meta.label) || r.type;
+                    const help = OTHER_HELP[r.type] || (r.meta && (r.meta.label || r.meta.url || r.meta.domain)) || r.type;
                     const ok = r.status === 'ok';
-                    return `
-                    <div style="display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--gray-100);align-items:center;" class="tip" data-tip="${esc(help)}">
-                        <div style="min-width:0;">
-                            <div style="font-weight:600;${ok ? 'color:var(--success);' : ''}">${esc(r.name)}</div>
-                            <div class="text-sm text-muted">${esc(help)}</div>
-                            ${r.last_error ? `<div class="text-sm" style="color:var(--danger);margin-top:4px;">${esc(r.last_error)}</div>` : ''}
-                        </div>
+                    const extra = (r.meta && (r.meta.url || r.meta.domain)) ? ' · ' + (r.meta.url || r.meta.domain) : '';
+                    return `<div style="display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--gray-100);align-items:center;" class="tip" data-tip="${esc(help)}">
+                        <div><div style="font-weight:600;${ok ? 'color:var(--success);' : ''}">${esc(r.name)}</div>
+                        <div class="text-sm text-muted">${esc(help)}${esc(extra)}</div></div>
                         ${statusPill(r.status, r.configured)}
                     </div>`;
-                }).join('');
+                }).join('') || '<p class="text-muted">Нет записей</p>';
             } catch (e) {
                 list.innerHTML = '<p class="text-muted">Ошибка загрузки</p>';
             }
@@ -292,10 +349,7 @@
                 };
                 const token = document.getElementById('ghToken').value;
                 if (token) secret.token = token;
-                await API.put('/api/integrations/' + id, {
-                    meta: { repoUrl: secret.repoUrl, branch: secret.branch },
-                    secret
-                });
+                await API.put('/api/integrations/' + id, { meta: { repoUrl: secret.repoUrl, branch: secret.branch }, secret });
                 showToast('GitHub сохранён', 'success');
                 await loadIntegrations();
             } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
@@ -314,36 +368,38 @@
                 if (pass) secret.password = pass;
                 const auto = !!document.getElementById('sshAutoConnect')?.checked;
                 await API.put('/api/integrations/' + id, {
-                    meta: {
-                        host: secret.host,
-                        port: secret.port,
-                        username: secret.username,
-                        appDir: secret.appDir,
-                        backupDir: secret.backupDir,
-                        auto_connect: auto
-                    },
+                    meta: { ...secret, auto_connect: auto, domain: DOMAIN },
                     secret
                 });
-                showToast('SSH сохранён (vault)', 'success');
+                showToast('SSH сохранён', 'success');
                 if (auto) await testIntegration(id);
                 else await loadIntegrations();
             } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
         };
 
-        window.saveAi = async function(id) {
+        window.addAi = async function() {
+            try {
+                const created = await API.post('/api/integrations', { name: 'Новая нейронка', type: '' });
+                activeAiId = created.id;
+                showToast('Добавлено', 'success');
+                await loadIntegrations();
+            } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
+        };
+
+        window.saveAiActive = async function() {
+            if (!activeAiId) return;
             try {
                 const meta = {};
-                document.querySelectorAll('.ai-field[data-id="' + id + '"]').forEach(inp => {
-                    const k = inp.dataset.k;
+                document.querySelectorAll('#secAi .ai-field').forEach(inp => {
                     let v = inp.value;
-                    if (k === 'tokens_used' || k === 'tokens_limit') v = Number(v) || 0;
-                    meta[k] = v;
+                    if (inp.dataset.k === 'tokens_used' || inp.dataset.k === 'tokens_limit') v = Number(v) || 0;
+                    meta[inp.dataset.k] = v;
                 });
                 const secret = {};
-                const key = document.getElementById('aiKey_' + id)?.value;
+                const key = document.getElementById('aiKeyActive')?.value;
                 if (key) secret.api_key = key;
-                await API.put('/api/integrations/' + id, { meta, secret });
-                showToast('Нейронка сохранена', 'success');
+                await API.put('/api/integrations/' + activeAiId, { meta, secret });
+                showToast('Сохранено', 'success');
                 await loadIntegrations();
             } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
         };
@@ -355,54 +411,43 @@
                 setLog(JSON.stringify(r, null, 2));
                 showToast(r.ok ? 'OK' : (r.error || 'Ошибка'), r.ok ? 'success' : 'error');
                 await loadIntegrations();
-            } catch (e) {
-                setLog(e.message || String(e));
-                showToast(e.message || 'Ошибка', 'error');
-            }
+            } catch (e) { setLog(e.message || String(e)); showToast(e.message || 'Ошибка', 'error'); }
         };
-
         window.runBackup = async function(id) {
-            if (!confirm('Сделать копию crm.db на сервере?')) return;
+            if (!confirm('Копия crm.db?')) return;
             try {
                 setLog('Бэкап…');
                 const r = await API.post('/api/integrations/' + id + '/backup', {});
-                setLog((r.out || '') + '\n' + (r.err || '') + '\npath: ' + (r.path || ''));
-                showToast(r.ok ? 'Бэкап готов' : 'Ошибка бэкапа', r.ok ? 'success' : 'error');
-                await loadIntegrations();
-            } catch (e) { setLog(e.message || String(e)); showToast(e.message || 'Ошибка', 'error'); }
+                setLog((r.out || '') + '\n' + (r.path || ''));
+                showToast(r.ok ? 'Бэкап готов' : 'Ошибка', r.ok ? 'success' : 'error');
+            } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
         };
-
         window.runDeploy = async function(id) {
-            if (!confirm('Деплой с GitHub?\n1) копия БД\n2) код\n3) миграции + health\n4) откат при ошибке')) return;
+            if (!confirm('Деплой с GitHub?')) return;
             try {
-                setLog('Деплой… 1–3 мин');
+                setLog('Деплой…');
                 const r = await API.post('/api/integrations/' + id + '/deploy', {});
-                setLog((r.backupOut || '') + '\n---\n' + (r.out || '') + '\n' + (r.err || '') + (r.restored ? '\n[восстановлена prev БД]' : ''));
-                showToast(r.ok ? 'Деплой OK' : 'Деплой с ошибкой', r.ok ? 'success' : 'error');
+                setLog((r.out || '') + '\n' + (r.err || ''));
+                showToast(r.ok ? 'Деплой OK' : 'Ошибка', r.ok ? 'success' : 'error');
+                await loadHealth();
                 await loadIntegrations();
-            } catch (e) { setLog(e.message || String(e)); showToast(e.message || 'Ошибка', 'error'); }
+            } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
         };
-
         window.runRestore = async function(id) {
-            if (!confirm('Откатить БД к crm.db.prev?')) return;
+            if (!confirm('Откатить БД?')) return;
             try {
-                setLog('Откат…');
                 const r = await API.post('/api/integrations/' + id + '/restore-prev', {});
-                setLog((r.out || '') + '\n' + (r.err || ''));
-                showToast(r.ok ? 'БД откачена' : 'Ошибка отката', r.ok ? 'success' : 'error');
-                await loadIntegrations();
-            } catch (e) { setLog(e.message || String(e)); showToast(e.message || 'Ошибка', 'error'); }
+                setLog(r.out || '');
+                showToast(r.ok ? 'Откат OK' : 'Ошибка', r.ok ? 'success' : 'error');
+            } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
         };
-
         window.runKeepOld = async function(id) {
-            if (!confirm('Оставить ТОЛЬКО старую БД?')) return;
+            if (!confirm('Оставить только старую БД?')) return;
             try {
-                setLog('Восстановление старой БД…');
                 const r = await API.post('/api/integrations/' + id + '/keep-old-db', {});
-                setLog((r.out || '') + '\n' + (r.err || ''));
+                setLog(r.out || '');
                 showToast(r.ok ? 'Старая БД активна' : 'Ошибка', r.ok ? 'success' : 'error');
-                await loadIntegrations();
-            } catch (e) { setLog(e.message || String(e)); showToast(e.message || 'Ошибка', 'error'); }
+            } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
         };
 
         document.getElementById('btnRefreshHealth').onclick = async () => {
@@ -413,10 +458,8 @@
 
         await loadHealth();
         await loadIntegrations();
-
-        // Auto-connect SSH if enabled
         const ssh = rows.find(r => r.type === 'ssh_deploy' || r.type === 'server_ssh');
-        if (isAdmin && ssh && ssh.meta && ssh.meta.auto_connect && ssh.config && ssh.config.has_password) {
+        if (isAdmin && ssh?.meta?.auto_connect && ssh.config?.has_password) {
             try { await testIntegration(ssh.id); } catch (e) {}
         }
     })();

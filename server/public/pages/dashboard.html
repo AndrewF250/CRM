@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дашборд — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=54">
+    <link rel="stylesheet" href="/assets/css/style.css?v=58">
 </head>
 <body>
     <div id="app"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
 
-    <script src="/assets/js/api.js?v=23"></script>
-    <script src="/assets/js/app.js?v=49"></script>
+    <script src="/assets/js/api.js?v=24"></script>
+    <script src="/assets/js/app.js?v=53"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
-    <script src="/assets/js/dashboard-board.js?v=5"></script>
+    <script src="/assets/js/dashboard-board.js?v=7"></script>
     <script>
     function formatDate(dateStr) {
         if (!dateStr) return '—';
@@ -88,15 +88,17 @@
                         <p class="page-subtitle" id="currentDate"></p>
                     </div>
                     <div class="page-actions db-header-actions">
-                        <button type="button" class="btn ${editMode ? 'btn-primary' : 'btn-secondary'}" id="dbSettingsBtn" title="Настройки дашборда">
+                        <button type="button" class="btn ${editMode ? 'btn-primary' : 'btn-secondary'} tip" id="dbSettingsBtn" data-tip="Режим раскладки: двигать и менять размер блоков" title="Настройки дашборда">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
                             ${editMode ? 'Готово' : 'Настройки'}
                         </button>
-                        ${editMode ? `<button type="button" class="btn btn-primary" id="dbAddBtn" title="Добавить блок">+</button>` : ''}
+                        ${editMode ? `<button type="button" class="btn btn-primary tip" id="dbAddBtn" data-tip="Добавить виджет на дашборд" title="Добавить блок">+</button>` : ''}
                     </div>
                 </div>
                 <div class="db-add-panel" id="dbAddPanel" ${showAddPanel && editMode ? '' : 'hidden'}></div>
-                <div class="db-board ${editMode ? 'db-edit' : ''}" id="dbBoard"></div>
+                <div class="db-board-wrap" id="dbBoardWrap">
+                    <div class="db-board ${editMode ? 'db-edit' : ''}" id="dbBoard"></div>
+                </div>
             `;
             initCommonUI();
             const now = new Date();
@@ -177,12 +179,34 @@
             });
         }
 
+        function fitBoardScale() {
+            const wrap = document.getElementById('dbBoardWrap');
+            const board = document.getElementById('dbBoard');
+            if (!wrap || !board) return;
+            // Design: 96 cols × ~12px + gaps ≈ comfortable desktop width
+            const designMin = 96 * 10 + 95 * 4; // ~1340px
+            const avail = wrap.clientWidth || wrap.getBoundingClientRect().width;
+            board.style.transform = '';
+            board.style.width = '';
+            wrap.style.height = '';
+            wrap.classList.remove('is-scaled');
+            if (editMode || !avail || avail >= designMin) return;
+            const scale = Math.max(0.55, Math.min(1, avail / designMin));
+            board.style.transformOrigin = 'top left';
+            board.style.transform = 'scale(' + scale + ')';
+            board.style.width = (100 / scale) + '%';
+            const h = board.scrollHeight * scale;
+            wrap.style.height = Math.ceil(h) + 'px';
+            wrap.classList.add('is-scaled');
+        }
+
         function renderBoard() {
             const board = document.getElementById('dbBoard');
             if (!board) return;
             board.className = 'db-board' + (editMode ? ' db-edit' : '');
             board.innerHTML = config.widgets.map(w => widgetShell(w)).join('');
             bindBoardInteractions(board);
+            requestAnimationFrame(fitBoardScale);
         }
 
         function widgetShell(w) {
@@ -190,7 +214,7 @@
             let filterHtml = '';
             if (w.type === 'tasks' || w.type === 'projects') {
                 filterHtml = `
-                <select class="form-select db-filter" data-wid="${esc(w.id)}" aria-label="Фильтр статуса">
+                <select class="form-select db-filter tip" data-wid="${esc(w.id)}" aria-label="Фильтр статуса" title="Фильтр по статусу" data-tip="Фильтр по статусу">
                     <option value="">Все статусы</option>
                     ${(w.type === 'tasks' ? taskStatusOptions() : projectStatusOptions()).map(s =>
                         `<option value="${esc(s)}"${w.filter === s ? ' selected' : ''}>${esc(s)}</option>`
@@ -209,7 +233,7 @@
                 </button>`;
             }
             const quickAdd = (w.type === 'documents' || w.type === 'projects' || w.type === 'calendar' || w.type === 'tasks' || w.type === 'goals' || w.type === 'reminders' || w.type === 'finances')
-                ? `<button type="button" class="btn btn-ghost btn-sm db-quick-add" data-add="${w.type}" data-wid="${esc(w.id)}" title="Добавить" aria-label="Добавить" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</button>`
+                ? `<button type="button" class="btn btn-ghost btn-sm db-quick-add tip" data-add="${w.type}" data-wid="${esc(w.id)}" data-tip="Быстро добавить" title="Добавить" aria-label="Добавить" style="padding:2px 8px;font-size:1.1rem;line-height:1;">+</button>`
                 : '';
             const link = {
                 documents: '/pages/documents.html',
@@ -513,20 +537,22 @@
                 body.innerHTML = '<p class="text-muted" style="text-align:center;padding:16px;">Нет задач</p>';
                 return;
             }
-            const priorityEmoji = { low: '🟢', medium: '🟡', high: '🔴' };
             body.innerHTML = tasks.map(t => {
                 const project = CRM.getProject(t.project_id);
                 const isPaused = t.column_status === 'Простой';
                 const desc = t.description && typeof renderDescClamp === 'function'
-                    ? renderDescClamp(t.description, { lines: 2, id: 'ddash_' + w.id + '_' + t.id }) : '';
+                    ? renderDescClamp(t.description, { lines: 2, id: 'ddash_' + w.id + '_' + t.id, compactFiles: true }) : '';
                 return `<div class="task-card${isPaused ? ' paused' : ''}" style="cursor:pointer;" onclick="if(!event.target.closest('.desc-clamp-wrap,.desc-clamp-btn,a'))crmGo('/pages/task.html?id=' + '${t.id}', '${(t.name || '').replace(/'/g, '')}')">
                     <div style="flex:1;min-width:0;">
-                        <div class="task-name" style="font-weight:600;font-size:0.95rem;">${esc(t.name)}</div>
+                        <div class="task-title-row">
+                            ${typeof renderPriorityMark === 'function' ? renderPriorityMark(t.priority) : ''}
+                            <div class="task-name" style="font-weight:600;font-size:0.95rem;">${esc(t.name)}</div>
+                        </div>
                         ${desc}
                         <div style="display:flex;gap:8px;margin-top:6px;font-size:0.8rem;color:var(--gray-500);flex-wrap:wrap;">
-                            ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" onclick="event.stopPropagation()" style="color:var(--primary);text-decoration:none;">' + esc(project.name) + '</a>' : ''}
-                            ${t.column_status ? '<span class="badge badge-gray" style="font-size:0.65rem;">' + esc(t.column_status) + '</span>' : ''}
-                            <span>${priorityEmoji[t.priority] || '🟡'}</span>
+                            ${project ? '<a href="/pages/project.html?id=' + t.project_id + '" onclick="event.stopPropagation()" class="tip" data-tip="Открыть проект" title="Открыть проект" style="color:var(--primary);text-decoration:none;">' + esc(project.name) + '</a>' : ''}
+                            ${t.column_status ? '<span class="badge badge-gray tip" data-tip="Статус задачи" title="Статус: ' + esc(t.column_status) + '" style="font-size:0.65rem;">' + esc(t.column_status) + '</span>' : ''}
+                            ${isPaused ? '<span class="badge badge-warning tip" data-tip="Задача на паузе" style="font-size:0.65rem;">ПРОСТОЙ</span>' : ''}
                         </div>
                     </div>
                 </div>`;
@@ -571,12 +597,14 @@
                             cdCls = days < 3 ? 'urgent' : 'ok';
                         }
                     }
-                    const progress = Math.min(100, Math.max(0, g.progress || 0));
-                    return `<div class="goal-card" style="margin-bottom:8px;padding:12px;cursor:pointer;" onclick="location.href='/pages/goals.html?goal=${g.id}'">
+                    const progress = typeof goalTimeProgress === 'function'
+                        ? goalTimeProgress(g.date_start, g.date_end, g.status)
+                        : Math.min(100, Math.max(0, g.progress || 0));
+                    return `<div class="goal-card tip" data-tip="Прогресс по сроку: ${progress}%" style="margin-bottom:8px;padding:12px;cursor:pointer;" onclick="location.href='/pages/goals.html?goal=${g.id}'">
                         <div style="display:flex;justify-content:space-between;gap:10px;">
                             <div style="flex:1;min-width:0;">
                                 <div style="font-weight:600;">${esc(g.name)}</div>
-                                <div class="goal-progress-bar"><span style="width:${progress}%"></span></div>
+                                <div class="goal-progress-bar" title="По сроку ${progress}%"><span style="width:${progress}%"></span></div>
                             </div>
                             <div class="goal-countdown ${cdCls}">${cdText}</div>
                         </div>
@@ -879,6 +907,18 @@
         shell();
         await loadDashboardData();
         window.refreshPageData = loadDashboardData;
+        window.addEventListener('resize', () => requestAnimationFrame(fitBoardScale));
+        window.addEventListener('crm-theme-change', () => requestAnimationFrame(fitBoardScale));
+        // Keep goal progress bars moving
+        setInterval(() => {
+            if (editMode) return;
+            document.querySelectorAll('.db-widget[data-type="goals"]').forEach(el => {
+                const id = el.dataset.id;
+                const w = config.widgets.find(x => x.id === id);
+                const body = document.getElementById('dbBody_' + id);
+                if (w && body) renderGoals(body, false);
+            });
+        }, 60000);
     })();
     </script>
 </body>

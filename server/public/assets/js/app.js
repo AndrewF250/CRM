@@ -11,18 +11,66 @@ function initTheme() {
     }
 }
 
-function toggleTheme() {
+function themeIconSvg(isDark) {
+    // isDark = currently dark → show sun (switch to light)
+    return isDark
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>';
+}
+
+/** Persist open drafts / editors before theme flip (no page reload). */
+function flushUiStateBeforeTheme() {
+    try {
+        document.querySelectorAll('[contenteditable="true"]').forEach(el => {
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.blur();
+        });
+        document.querySelectorAll('input, textarea, select').forEach(el => {
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        if (typeof window.__crmFlushDrafts === 'function') window.__crmFlushDrafts();
+        if (typeof window.__crmAutosave === 'function') window.__crmAutosave();
+    } catch (e) {}
+}
+
+function refreshThemeChrome() {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    if (isDark) {
-        document.documentElement.removeAttribute('data-theme');
-        localStorage.setItem('crm_theme', 'light');
-    } else {
+    document.querySelectorAll('.header-icon-btn[onclick*="toggleTheme"], #themeToggleBtn').forEach(btn => {
+        btn.innerHTML = themeIconSvg(isDark);
+        const label = isDark ? 'Светлая тема' : 'Тёмная тема';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+    // Settings theme buttons, if on page
+    document.querySelectorAll('[onclick*="setTheme(\'light\')"]').forEach(b => {
+        b.classList.toggle('btn-primary', !isDark);
+        b.classList.toggle('btn-secondary', isDark);
+    });
+    document.querySelectorAll('[onclick*="setTheme(\'dark\')"]').forEach(b => {
+        b.classList.toggle('btn-primary', isDark);
+        b.classList.toggle('btn-secondary', !isDark);
+    });
+}
+
+function applyTheme(theme) {
+    flushUiStateBeforeTheme();
+    const next = theme === 'dark' ? 'dark' : 'light';
+    if (next === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
         localStorage.setItem('crm_theme', 'dark');
+    } else {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('crm_theme', 'light');
     }
-    // Reload to apply theme to all inline-styled elements
-    location.reload();
+    refreshThemeChrome();
+    window.dispatchEvent(new CustomEvent('crm-theme-change', { detail: { theme: next } }));
 }
+
+function toggleTheme() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    applyTheme(isDark ? 'light' : 'dark');
+}
+window.applyTheme = applyTheme;
 
 // ==================== SIDEBAR COMPONENT ====================
 function renderSidebar(activePage) {
@@ -141,11 +189,8 @@ function renderHeader() {
                         <div class="hotkeys-list" id="hotkeysList"></div>
                     </div>
                 </div>
-                <button class="header-icon-btn" onclick="toggleTheme()" title="${isDark ? 'Светлая тема' : 'Тёмная тема'}" aria-label="${isDark ? 'Светлая тема' : 'Тёмная тема'}">
-                    ${isDark
-                        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
-                        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>'
-                    }
+                <button class="header-icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="${isDark ? 'Светлая тема' : 'Тёмная тема'}" aria-label="${isDark ? 'Светлая тема' : 'Тёмная тема'}">
+                    ${themeIconSvg(isDark)}
                 </button>
                 <div class="header-notifications">
                     <button class="header-icon-btn" id="notifBtn" title="Уведомления" aria-label="Уведомления">
@@ -476,11 +521,75 @@ function initGlobalSearch() {
 }
 
 // ==================== INIT COMMON UI ====================
+/** Floating tooltips for [data-tip] — rendered in body, never clipped by cards. */
+function initDataTipTooltips() {
+    if (window._crmTipsInit) return;
+    window._crmTipsInit = true;
+    let bubble = document.getElementById('crmTipBubble');
+    if (!bubble) {
+        bubble = document.createElement('div');
+        bubble.id = 'crmTipBubble';
+        bubble.setAttribute('role', 'tooltip');
+        document.body.appendChild(bubble);
+    }
+    let hideTimer = null;
+    let activeEl = null;
+
+    function hide() {
+        bubble.classList.remove('is-on');
+        activeEl = null;
+    }
+
+    function place(el) {
+        const text = (el.getAttribute('data-tip') || '').trim();
+        if (!text) { hide(); return; }
+        activeEl = el;
+        bubble.textContent = text;
+        bubble.classList.add('is-on');
+        const r = el.getBoundingClientRect();
+        const pad = 8;
+        // Measure after content set
+        const bw = bubble.offsetWidth || 160;
+        const bh = bubble.offsetHeight || 32;
+        let left = r.left + r.width / 2 - bw / 2;
+        left = Math.max(pad, Math.min(window.innerWidth - bw - pad, left));
+        let top = r.top - bh - 8;
+        if (top < pad) top = r.bottom + 8; // flip below if no room above
+        if (top + bh > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - bh - pad);
+        bubble.style.left = Math.round(left) + 'px';
+        bubble.style.top = Math.round(top) + 'px';
+    }
+
+    function findTipEl(node) {
+        if (!node || !node.closest) return null;
+        return node.closest('[data-tip]');
+    }
+
+    document.addEventListener('mouseover', (e) => {
+        const el = findTipEl(e.target);
+        if (!el) return;
+        clearTimeout(hideTimer);
+        place(el);
+    });
+    document.addEventListener('mouseout', (e) => {
+        const from = findTipEl(e.target);
+        if (!from) return;
+        const to = findTipEl(e.relatedTarget);
+        if (to === from) return;
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(hide, 80);
+    });
+    document.addEventListener('scroll', () => { if (activeEl) place(activeEl); }, true);
+    window.addEventListener('resize', hide);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+}
+
 function initCommonUI() {
     // Badges must refresh on every call: pages re-render the whole #app on tab
     // switches, which resets the badge elements to their "0" template values
     updateBadges();
     initGlobalSearch();
+    initDataTipTooltips();
     // Version label (re-rendered with header)
     (async () => {
         const el = document.getElementById('appVersionRow');
@@ -1748,29 +1857,81 @@ const PRIORITY_LABEL = { low: 'Низкий', medium: 'Средний', high: '�
 
 function renderPriorityMark(priority) {
     const p = priority || 'medium';
-    return `<span class="prio-mark" title="${PRIORITY_LABEL[p] || 'Средний'}" style="background:${PRIORITY_DOT[p] || PRIORITY_DOT.medium};"></span>`;
+    const label = PRIORITY_LABEL[p] || 'Средний';
+    const tip = 'Приоритет: ' + label;
+    return `<span class="prio-mark tip" data-tip="${tip}" title="${tip}" aria-label="${tip}" style="background:${PRIORITY_DOT[p] || PRIORITY_DOT.medium};"></span>`;
+}
+
+/** In card previews force attachments to compact file-type chips (no full embed). */
+function forceAttachPreviewChips(html) {
+    if (!html) return '';
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    div.querySelectorAll('.rich-attach').forEach(block => {
+        block.setAttribute('data-mode', 'link');
+        const name = block.getAttribute('data-name') || 'Файл';
+        const mime = block.getAttribute('data-mime') || '';
+        const kind = block.getAttribute('data-kind') || guessFileKind(name, mime);
+        const ext = (String(name).split('.').pop() || kind || 'file').toUpperCase().slice(0, 6);
+        const tip = (kind || 'file') + (name ? ': ' + name : '');
+        block.setAttribute('title', tip);
+        block.setAttribute('data-tip', tip);
+        block.classList.add('tip', 'rich-attach-chip');
+        // Replace heavy media with type badge
+        const link = block.querySelector('.rich-attach-link');
+        if (link) {
+            link.textContent = ext;
+            link.title = tip;
+        } else {
+            block.innerHTML = `<a class="rich-attach-link" href="${block.getAttribute('data-file') || '#'}" target="_blank" rel="noopener" draggable="false" title="${escapeHtmlText(tip)}">${escapeHtmlText(ext)}</a>`;
+        }
+        const modeBtn = block.querySelector('.rich-attach-mode');
+        if (modeBtn) modeBtn.remove();
+    });
+    return div.innerHTML;
 }
 
 /**
  * Compact rich description preview for cards (headings/lists kept).
  * Interactive nodes are inert; chevron toggles expand. DnD-safe via CSS.
  */
-function renderDescClamp(html, { lines = 3, id } = {}) {
-    const text = stripHtmlText(html);
-    if (!text) return '';
+function renderDescClamp(html, { lines = 3, id, compactFiles = true } = {}) {
+    const prepared = compactFiles ? forceAttachPreviewChips(html) : html;
+    const text = stripHtmlText(prepared);
+    if (!text && !(prepared && prepared.includes('rich-attach'))) return '';
     const cid = id || ('dc_' + Math.random().toString(36).slice(2, 9));
-    const long = text.length > 90 || /<(h[1-6]|ul|ol|li|br|p)\b/i.test(html || '');
-    const rich = renderRichHtml(html);
+    const long = text.length > 90 || /<(h[1-6]|ul|ol|li|br|p)\b/i.test(prepared || '');
+    const rich = renderRichHtml(prepared);
     return `<div class="desc-clamp-wrap${long ? '' : ' desc-short'}" data-desc-clamp="${cid}">
         <div class="desc-clamp-row">
             <div class="desc-clamp rich-content" id="${cid}" style="--desc-lines:${lines}">${rich}</div>
-            ${long ? `<button type="button" class="desc-clamp-btn" onclick="event.preventDefault();event.stopPropagation();toggleDescClamp(this);return false;" title="Развернуть" aria-label="Развернуть описание">
+            ${long ? `<button type="button" class="desc-clamp-btn tip" data-tip="Развернуть описание" onclick="event.preventDefault();event.stopPropagation();toggleDescClamp(this);return false;" title="Развернуть" aria-label="Развернуть описание">
                 <svg class="chev-down" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>
                 <svg class="chev-up" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg>
             </button>` : ''}
         </div>
     </div>`;
 }
+
+/** Progress 0–100 by time between start and end (moves toward deadline). */
+function goalTimeProgress(dateStart, dateEnd, status) {
+    if (status === 'done') return 100;
+    if (!dateEnd) return 0;
+    const end = new Date(String(dateEnd).slice(0, 10) + 'T23:59:59').getTime();
+    if (Number.isNaN(end)) return 0;
+    let start;
+    if (dateStart) {
+        start = new Date(String(dateStart).slice(0, 10) + 'T00:00:00').getTime();
+    } else {
+        start = end - 30 * 86400000;
+    }
+    if (Number.isNaN(start) || end <= start) return 0;
+    const now = Date.now();
+    if (now <= start) return 0;
+    if (now >= end) return 100;
+    return Math.min(100, Math.max(0, Math.round(((now - start) / (end - start)) * 100)));
+}
+window.goalTimeProgress = goalTimeProgress;
 
 window.toggleDescClamp = function(btn, ev) {
     if (ev) {

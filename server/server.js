@@ -1668,9 +1668,16 @@ app.get('/api/activity', requireAuth, (req, res) => {
 
 app.get('/api/salaries', requireAuth, (req, res) => {
   try {
-    const { month } = req.query;
+    const { month, from, to } = req.query;
     let salaries;
-    if (month) {
+    if (from && to) {
+      salaries = db.prepare(`
+        SELECT * FROM salaries
+        WHERE COALESCE(NULLIF(pay_date,''), paid_date, substr(created_at,1,10), month || '-01') >= ?
+          AND COALESCE(NULLIF(pay_date,''), paid_date, substr(created_at,1,10), month || '-01') <= ?
+        ORDER BY COALESCE(NULLIF(pay_date,''), paid_date, created_at) DESC
+      `).all(String(from).slice(0, 10), String(to).slice(0, 10));
+    } else if (month) {
       salaries = db.prepare('SELECT * FROM salaries WHERE month = ? ORDER BY created_at DESC').all(month);
     } else {
       salaries = db.prepare('SELECT * FROM salaries ORDER BY created_at DESC').all();
@@ -1741,14 +1748,21 @@ app.delete('/api/salaries/:id', requireAuth, (req, res) => {
 app.get('/api/expenses', requireAuth, (req, res) => {
   try {
     syncExpenseReminders();
-    const { category, month } = req.query;
+    const { category, month, from, to } = req.query;
     let expenses;
-    if (category) {
+    if (from && to) {
+      expenses = db.prepare(
+        'SELECT * FROM expenses WHERE date >= ? AND date <= ? ORDER BY date DESC, created_at DESC'
+      ).all(String(from).slice(0, 10), String(to).slice(0, 10));
+    } else if (category) {
       expenses = db.prepare('SELECT * FROM expenses WHERE category = ? ORDER BY date DESC, created_at DESC').all(category);
     } else if (month) {
       expenses = db.prepare("SELECT * FROM expenses WHERE strftime('%Y-%m', date) = ? ORDER BY date DESC, created_at DESC").all(month);
     } else {
       expenses = db.prepare('SELECT * FROM expenses ORDER BY date DESC, created_at DESC').all();
+    }
+    if (category && from && to) {
+      expenses = expenses.filter(e => e.category === category);
     }
     res.json(expenses.map(e => ({
       ...e,
@@ -1857,9 +1871,13 @@ app.delete('/api/expenses/:id', requireAuth, (req, res) => {
 
 app.get('/api/expenses/stats', requireAuth, (req, res) => {
   try {
-    const { month } = req.query;
+    const { month, from, to } = req.query;
     let stats;
-    if (month) {
+    if (from && to) {
+      stats = db.prepare(
+        'SELECT category, SUM(amount) as total FROM expenses WHERE date >= ? AND date <= ? GROUP BY category ORDER BY total DESC'
+      ).all(String(from).slice(0, 10), String(to).slice(0, 10));
+    } else if (month) {
       stats = db.prepare("SELECT category, SUM(amount) as total FROM expenses WHERE strftime('%Y-%m', date) = ? GROUP BY category ORDER BY total DESC").all(month);
     } else {
       stats = db.prepare("SELECT category, SUM(amount) as total FROM expenses GROUP BY category ORDER BY total DESC").all();
@@ -1871,6 +1889,45 @@ app.get('/api/expenses/stats', requireAuth, (req, res) => {
       .filter(s => s.category !== 'Возврат')
       .reduce((sum, s) => sum + (s.total || 0), 0);
     res.json({ categories: stats, total, refund_total: refundTotal });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Expense categories (money settings)
+app.get('/api/expense-categories', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM expense_categories ORDER BY sort_order ASC, name ASC').all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/expense-categories', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'Укажите название' });
+    const max = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM expense_categories').get();
+    const info = db.prepare(
+      'INSERT INTO expense_categories (name, sort_order, is_system) VALUES (?, ?, 0)'
+    ).run(name, (max?.m ?? -1) + 1);
+    res.status(201).json(db.prepare('SELECT * FROM expense_categories WHERE id = ?').get(info.lastInsertRowid));
+  } catch (err) {
+    if (String(err.message).includes('UNIQUE')) return res.status(400).json({ error: 'Такая категория уже есть' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/expense-categories/:id', requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
+    const row = db.prepare('SELECT * FROM expense_categories WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Не найдено' });
+    if (row.is_system) return res.status(400).json({ error: 'Системную категорию нельзя удалить' });
+    db.prepare('DELETE FROM expense_categories WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2322,6 +2379,49 @@ app.get('/api/integrations/health', requireAuth, (req, res) => {
   }
 });
 
+app.post('/api/integrations', requireAuth, (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const name = String(req.body.name || '').trim() || 'Новая нейронка';
+    let type = String(req.body.type || '').trim();
+    if (!type) type = 'ai_custom_' + Date.now().toString(36);
+    if (!type.startsWith('ai_')) type = 'ai_' + type.replace(/[^a-z0-9_]/gi, '_').slice(0, 40);
+    const meta = Object.assign({
+      provider: 'custom',
+      tokens_used: 0,
+      tokens_limit: 0,
+      purchase_date: '',
+      renew_date: '',
+      tariff: '',
+      label: 'Расход токенов и дата тарифа'
+    }, req.body.meta && typeof req.body.meta === 'object' ? req.body.meta : {});
+    const info = db.prepare(
+      "INSERT INTO integrations (type, name, status, meta) VALUES (?, ?, 'idle', ?)"
+    ).run(type, name, JSON.stringify(meta));
+    res.status(201).json(integrationPublic(getIntegration(info.lastInsertRowid)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/integrations/:id', requireAuth, (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const row = getIntegration(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Не найдено' });
+    if (!String(row.type || '').startsWith('ai_')) {
+      return res.status(400).json({ error: 'Удалять можно только AI-интеграции' });
+    }
+    if (row.type === 'ai_openai' || row.type === 'ai_claude') {
+      return res.status(400).json({ error: 'Системные AI нельзя удалить — переименуйте' });
+    }
+    db.prepare('DELETE FROM integrations WHERE id = ?').run(row.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/integrations/:id', requireAuth, async (req, res) => {
   try {
     if (!requireAdmin(req, res)) return;
@@ -2469,8 +2569,16 @@ app.get('/api/app-info', requireAuth, (req, res) => {
   let changelogHead = '';
   try {
     const fs = require('fs');
-    const p = require('path').join(__dirname, '..', 'CHANGELOG.md');
-    changelogHead = fs.readFileSync(p, 'utf8').split('\n').slice(0, 40).join('\n');
+    const candidates = [
+      require('path').join(__dirname, 'CHANGELOG.md'),
+      require('path').join(__dirname, '..', 'CHANGELOG.md')
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        changelogHead = fs.readFileSync(p, 'utf8').split('\n').slice(0, 40).join('\n');
+        break;
+      }
+    }
   } catch (e) {}
   res.json({ ...info, poll: changeVersion, changelogHead });
 });

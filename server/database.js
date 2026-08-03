@@ -149,6 +149,30 @@ try {
   db.exec("ALTER TABLE salaries ADD COLUMN payment_method TEXT DEFAULT 'transfer'");
 }
 
+// Editable expense categories (money settings)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expense_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    sort_order INTEGER DEFAULT 0,
+    is_system INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+try {
+  const catN = db.prepare('SELECT COUNT(*) as c FROM expense_categories').get().c;
+  if (!catN) {
+    const insCat = db.prepare('INSERT INTO expense_categories (name, sort_order, is_system) VALUES (?, ?, ?)');
+    [
+      ['Сервера', 0, 1],
+      ['ИИ', 1, 1],
+      ['Налоги', 2, 1],
+      ['Возврат', 3, 1],
+      ['Зарплата', 4, 1]
+    ].forEach(([n, o, sys]) => insCat.run(n, o, sys));
+  }
+} catch (e) {}
+
 // Create reminders table
 db.exec(`
   CREATE TABLE IF NOT EXISTS reminders (
@@ -388,7 +412,12 @@ try {
     appDir: '/var/www/crm-app/server',
     backupDir: '/var/www/crm-app/backups',
     auto_connect: false,
+    domain: 'http://crm-seo-123.xyz/',
     label: 'Прод-сервер: заливка кода и бэкап БД'
+  });
+  ensure('domain', 'Домен CRM', {
+    url: 'http://crm-seo-123.xyz/',
+    label: 'Публичный адрес CRM'
   });
   ensure('ai_openai', 'OpenAI / ChatGPT', {
     provider: 'openai',
@@ -420,7 +449,10 @@ try {
   try {
     db.prepare("UPDATE integrations SET name = 'CRM App (этот сервер)', status = 'ok' WHERE type = 'server'").run();
     db.prepare("UPDATE integrations SET name = 'База данных SQLite', status = 'ok' WHERE type = 'database'").run();
-    db.prepare("UPDATE integrations SET name = 'Хостинг / домен (биллинг)' WHERE type = 'subscription'").run();
+    db.prepare("UPDATE integrations SET name = 'Хостинг / домен (биллинг)', meta = ? WHERE type = 'subscription'")
+      .run(JSON.stringify({ note: 'Биллинг позже', domain: 'http://crm-seo-123.xyz/' }));
+    db.prepare("UPDATE integrations SET name = 'OpenAI / ChatGPT' WHERE type = 'ai_openai'").run();
+    db.prepare("UPDATE integrations SET name = 'Anthropic Claude' WHERE type = 'ai_claude'").run();
   } catch (e) {}
 } catch (e) {}
 

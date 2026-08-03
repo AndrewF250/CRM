@@ -20,27 +20,35 @@
     finances: { title: 'Финансы', minW: 16, minH: 12, defaultW: 48, defaultH: 12 }
   };
 
+  /** Bump when shipping a new shared base layout (one-time reset for all users). */
+  const BASE_LAYOUT_REV = '20260803a';
+
   function storageKey(user) {
     const id = (user && (user.id || user.username || user.name)) || 'guest';
-    return 'crm_dash_config_' + String(id);
+    return 'crm_dash_config_' + BASE_LAYOUT_REV + '_' + String(id);
   }
 
   function uid() {
     return 'w_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
   }
 
+  /** Shared base layout (96-col). Narrow screens: fitBoardScale() in dashboard.html. */
+  const BASE_WIDGETS = [
+    { id: 'w_base_stats', type: 'stats', x: 0, y: 0, w: 32, h: 11, filter: '' },
+    { id: 'w_base_documents', type: 'documents', x: 0, y: 12, w: 32, h: 36, filter: '' },
+    { id: 'w_base_tasks', type: 'tasks', x: 33, y: 0, w: 31, h: 34, filter: '' },
+    { id: 'w_base_projects', type: 'projects', x: 65, y: 0, w: 31, h: 34, filter: '' },
+    { id: 'w_base_goals', type: 'goals', x: 33, y: 35, w: 31, h: 13, filter: '' },
+    { id: 'w_base_finances', type: 'finances', x: 65, y: 35, w: 31, h: 13, filter: '' },
+    { id: 'w_base_calendar', type: 'calendar', x: 0, y: 49, w: 48, h: 16, filter: '3' },
+    { id: 'w_base_reminders', type: 'reminders', x: 49, y: 49, w: 47, h: 16, filter: '' }
+  ];
+
   function defaultConfig() {
     return {
       type: CONFIG_TYPE,
       version: CONFIG_VERSION,
-      widgets: [
-        { id: uid(), type: 'stats', x: 0, y: 0, w: 96, h: 6, filter: '' },
-        { id: uid(), type: 'documents', x: 0, y: 6, w: 32, h: 28, filter: '' },
-        { id: uid(), type: 'tasks', x: 32, y: 6, w: 32, h: 18, filter: '' },
-        { id: uid(), type: 'projects', x: 64, y: 6, w: 32, h: 18, filter: '' },
-        { id: uid(), type: 'goals', x: 32, y: 24, w: 64, h: 14, filter: '' },
-        { id: uid(), type: 'reminders', x: 32, y: 38, w: 64, h: 14, filter: '' }
-      ]
+      widgets: BASE_WIDGETS.map(w => ({ ...w }))
     };
   }
 
@@ -256,6 +264,7 @@
     WIDGET_META,
     CONFIG_TYPE,
     CONFIG_VERSION,
+    BASE_LAYOUT_REV,
     storageKey,
     uid,
     defaultConfig,

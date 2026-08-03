@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Задача — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=54">
+    <link rel="stylesheet" href="/assets/css/style.css?v=58">
     <style>
         .task-stat-card { position: relative; }
         .task-stat-card .edit-pencil {
@@ -33,7 +33,7 @@
     <div class="modal-overlay" id="modalOverlay"></div>
 
     <script src="/assets/js/api.js?v=18"></script>
-    <script src="/assets/js/app.js?v=49"></script>
+    <script src="/assets/js/app.js?v=53"></script>
     <script src="/assets/js/crm-data.js?v=17"></script>
     <script>
     (async function() {
@@ -357,21 +357,21 @@
                     </div>
                 </div>
 
-                ${(isEpic || childTasks.length) ? `
+                ${!task.parent_id ? `
                 <div class="card" style="margin-bottom:16px;border-left:3px solid #F59E0B;" id="epicChildrenCard">
-                    <div class="card-header">
+                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
                         <h3 class="card-title" style="display:flex;align-items:center;gap:8px;">${boltSvg} Связанные задачи</h3>
+                        <button type="button" class="btn btn-primary btn-sm tip" id="btnAddChildHeader" data-tip="Создать задачу и сразу связать" title="Создать и связать" aria-label="Создать связанную задачу" style="padding:2px 10px;font-size:1.1rem;line-height:1;">+</button>
                     </div>
                     <div class="card-body">
                         ${childTasks.length ? childTasks.map(c => renderRelatedCard(c, 0)).join('') : '<p class="text-muted text-sm" style="margin:0 0 12px;">Пока нет связанных задач</p>'}
-                        ${isEpic ? `
                         <div class="child-add-row">
                             <div class="related-search-wrap">
-                                <input type="text" class="form-input" id="newChildName" placeholder="Поиск или новая связанная задача…" autocomplete="off">
+                                <input type="text" class="form-input tip" id="newChildName" data-tip="Введите название новой или найдите существующую" placeholder="Поиск или новая связанная задача…" autocomplete="off" title="Поиск или новая задача">
                                 <div class="related-search-dd" id="relatedSearchDd"></div>
                             </div>
-                            <button type="button" class="btn btn-primary btn-sm" id="btnAddChild" title="Создать новую">+</button>
-                        </div>` : ''}
+                            <button type="button" class="btn btn-primary btn-sm tip" id="btnAddChild" data-tip="Создать задачу и сразу связать" title="Создать новую">+</button>
+                        </div>
                     </div>
                 </div>` : ''}
 
@@ -411,6 +411,18 @@
 
             const btnAddChild = document.getElementById('btnAddChild');
             if (btnAddChild) btnAddChild.addEventListener('click', () => addChildTask());
+            const btnAddChildHeader = document.getElementById('btnAddChildHeader');
+            if (btnAddChildHeader) {
+                btnAddChildHeader.addEventListener('click', () => {
+                    const input = document.getElementById('newChildName');
+                    if (input && !input.value.trim()) {
+                        input.focus();
+                        showToast('Введите название связанной задачи', 'success');
+                        return;
+                    }
+                    addChildTask();
+                });
+            }
             bindRelatedSearch();
 
             bindRichEditor('taskDescEditor', {

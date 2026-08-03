@@ -13,15 +13,41 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const VERSION_FILE = path.join(ROOT, 'VERSION');
-const CHANGELOG_FILE = path.join(ROOT, 'CHANGELOG.md');
+const VERSION_CANDIDATES = [
+  path.join(__dirname, 'VERSION'),          // next to server.js (prod deploy)
+  path.join(ROOT, 'VERSION'),               // repo root (dev)
+  path.join(__dirname, '..', 'VERSION')
+];
+const CHANGELOG_CANDIDATES = [
+  path.join(__dirname, 'CHANGELOG.md'),
+  path.join(ROOT, 'CHANGELOG.md')
+];
+
+function resolveExisting(paths) {
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch (e) {}
+  }
+  return paths[0];
+}
+
+const VERSION_FILE = resolveExisting(VERSION_CANDIDATES);
+const CHANGELOG_FILE = resolveExisting(CHANGELOG_CANDIDATES);
 
 function readVersion() {
-  try {
-    return fs.readFileSync(VERSION_FILE, 'utf8').trim() || '0.0.0';
-  } catch (e) {
-    return '0.0.0';
+  for (const p of VERSION_CANDIDATES) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const v = fs.readFileSync(p, 'utf8').trim();
+      if (v) return v;
+    } catch (e) {}
   }
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    if (pkg.version) return String(pkg.version);
+  } catch (e) {}
+  return '0.0.0';
 }
 
 function writeVersion(v) {
