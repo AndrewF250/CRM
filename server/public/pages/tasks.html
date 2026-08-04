@@ -1115,44 +1115,17 @@
             };
         }
 
-        window.showAddNestedTask = function(parentId) {
+        window.showAddNestedTask = async function(parentId) {
             const parent = CRM.getTasks().find(t => t.id === parentId);
             if (!parent) return;
-            const overlay = document.getElementById('modalOverlay');
-            const personOpts = ['Костя', 'Максим', 'Андрей'].map(p =>
-                `<option${(parent.person || '') === p ? ' selected' : ''}>${p}</option>`
-            ).join('');
-            overlay.innerHTML = `
-                <div class="modal" onclick="event.stopPropagation()">
-                    <div class="modal-header"><h3 class="modal-title">Вложенная задача</h3><button class="modal-close" onclick="closeModal(true)" aria-label="Закрыть"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-                    <div class="modal-body">
-                        <p class="text-sm text-muted" style="margin:0 0 12px;">Родитель: <strong>${String(parent.name || '').replace(/</g,'&lt;')}</strong></p>
-                        <div class="form-group"><label class="form-label" for="nestTaskName">Название *</label><input type="text" class="form-input" id="nestTaskName" placeholder="Что сделать?"></div>
-                        <div class="form-group"><label class="form-label" for="nestTaskPerson">Исполнитель</label><select class="form-select" id="nestTaskPerson">${personOpts}</select></div>
-                        <div class="form-row">
-                            <div class="form-group"><label class="form-label" for="nestTaskDate">Начало</label><input type="datetime-local" class="form-input" id="nestTaskDate" value="${todayDatetimeLocal()}"></div>
-                            <div class="form-group"><label class="form-label" for="nestTaskDateEnd">Окончание</label><input type="datetime-local" class="form-input" id="nestTaskDateEnd"></div>
-                        </div>
-                    </div>
-                    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Отмена</button><button class="btn btn-primary" onclick="createNestedTask('${parentId}')">Создать</button></div>
-                </div>`;
-            overlay.classList.add('show');
-            document.body.style.overflow = 'hidden';
-            setTimeout(() => document.getElementById('nestTaskName')?.focus(), 50);
-        };
-
-        window.createNestedTask = async function(parentId) {
-            const parent = CRM.getTasks().find(t => t.id === parentId);
-            const name = (document.getElementById('nestTaskName')?.value || '').trim();
-            if (!name) { showToast('Введите название', 'error'); return; }
             try {
-                await CRM.addTask({
-                    project_id: parent?.project_id || '',
-                    name,
-                    column_status: parent?.column_status || 'Ожидает',
-                    person: document.getElementById('nestTaskPerson')?.value || parent?.person || 'Костя',
-                    date: document.getElementById('nestTaskDate')?.value || todayDatetimeLocal(),
-                    date_end: document.getElementById('nestTaskDateEnd')?.value || '',
+                const created = await CRM.addTask({
+                    project_id: parent.project_id || '',
+                    name: 'Новая задача',
+                    column_status: parent.column_status || 'Ожидает',
+                    person: parent.person || (API.getCurrentUser() || {}).name || 'Костя',
+                    date: todayDatetimeLocal(),
+                    date_end: '',
                     time: '',
                     parent_id: parentId,
                     priority: 'medium',
@@ -1161,19 +1134,22 @@
                     hashtags: [],
                     description: ''
                 });
-                closeModal();
-                showToast('Вложенная задача создана', 'success');
+                if (!created || !created.id) throw new Error('Не удалось создать задачу');
                 await CRM.load();
-                // Auto-Epic when parent has linked children
-                const childCount = CRM.getTasks().filter(t => t.parent_id === parentId).length;
-                if (parent && !parent.parent_id && childCount >= 1 && !CRM.getTasks().find(t => t.id === parentId)?.is_epic) {
-                    try { await CRM.updateTask(parentId, { is_epic: true }); await CRM.load(); } catch (e) {}
+                if (parent && !parent.parent_id) {
+                    const childCount = CRM.getTasks().filter(t => t.parent_id === parentId).length;
+                    if (childCount >= 1 && !CRM.getTasks().find(t => t.id === parentId)?.is_epic) {
+                        try { await CRM.updateTask(parentId, { is_epic: true }); } catch (e) {}
+                    }
                 }
-                await renderTasks();
+                showToast('Вложенная задача создана', 'success');
+                crmGo('/pages/task.html?id=' + encodeURIComponent(created.id), created.name || 'Новая задача');
             } catch (err) {
                 showToast(err.message || 'Ошибка', 'error');
             }
         };
+
+        window.createNestedTask = window.showAddNestedTask;
         
         window.showAddSubtaskModal = function(taskId) {
             const overlay = document.getElementById('modalOverlay');

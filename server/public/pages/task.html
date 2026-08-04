@@ -297,6 +297,7 @@
                         </div>
                     </div>
                     <div class="page-actions">
+                        <button type="button" class="btn btn-primary btn-sm" id="btnQuickNested" title="Создать вложенную задачу" aria-label="Создать вложенную">+</button>
                         <button class="btn btn-secondary btn-sm" onclick="undoChange()" title="Ctrl+Z" ${undoStack.length ? '' : 'disabled'}>↩ Undo</button>
                         <button class="btn btn-danger" onclick="deleteThisTask()" title="Ctrl+Backspace"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg> Удалить</button>
                     </div>
@@ -357,23 +358,23 @@
                     </div>
                 </div>
 
-                ${!task.parent_id ? `
                 <div class="card" style="margin-bottom:16px;border-left:3px solid #F59E0B;" id="epicChildrenCard">
                     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                        <h3 class="card-title" style="display:flex;align-items:center;gap:8px;">${boltSvg} Связанные задачи</h3>
-                        <button type="button" class="btn btn-primary btn-sm tip" id="btnAddChildHeader" data-tip="Создать задачу и сразу связать" title="Создать и связать" aria-label="Создать связанную задачу" style="padding:2px 10px;font-size:1.1rem;line-height:1;">+</button>
+                        <h3 class="card-title" style="display:flex;align-items:center;gap:8px;">${boltSvg} ${isNested ? 'Вложенные задачи' : 'Связанные задачи'}</h3>
+                        <button type="button" class="btn btn-primary btn-sm tip" id="btnAddChildHeader" data-tip="Создать вложенную и открыть" title="Создать вложенную" aria-label="Создать вложенную задачу" style="padding:2px 10px;font-size:1.1rem;line-height:1;">+</button>
                     </div>
                     <div class="card-body">
-                        ${childTasks.length ? childTasks.map(c => renderRelatedCard(c, 0)).join('') : '<p class="text-muted text-sm" style="margin:0 0 12px;">Пока нет связанных задач</p>'}
+                        ${childTasks.length ? childTasks.map(c => renderRelatedCard(c, 0)).join('') : '<p class="text-muted text-sm" style="margin:0 0 12px;">Пока нет вложенных задач</p>'}
+                        ${!isNested ? `
                         <div class="child-add-row">
                             <div class="related-search-wrap">
                                 <input type="text" class="form-input tip" id="newChildName" data-tip="Введите название новой или найдите существующую" placeholder="Поиск или новая связанная задача…" autocomplete="off" title="Поиск или новая задача">
                                 <div class="related-search-dd" id="relatedSearchDd"></div>
                             </div>
-                            <button type="button" class="btn btn-primary btn-sm tip" id="btnAddChild" data-tip="Создать задачу и сразу связать" title="Создать новую">+</button>
-                        </div>
+                            <button type="button" class="btn btn-primary btn-sm tip" id="btnAddChild" data-tip="Создать и открыть" title="Создать новую">+</button>
+                        </div>` : ''}
                     </div>
-                </div>` : ''}
+                </div>
 
                 <div class="service-accordion" id="serviceAccordion">
                     <button type="button" class="service-accordion-head" id="serviceToggle">
@@ -413,15 +414,11 @@
             if (btnAddChild) btnAddChild.addEventListener('click', () => addChildTask());
             const btnAddChildHeader = document.getElementById('btnAddChildHeader');
             if (btnAddChildHeader) {
-                btnAddChildHeader.addEventListener('click', () => {
-                    const input = document.getElementById('newChildName');
-                    if (input && !input.value.trim()) {
-                        input.focus();
-                        showToast('Введите название связанной задачи', 'success');
-                        return;
-                    }
-                    addChildTask();
-                });
+                btnAddChildHeader.addEventListener('click', () => createNestedAndOpen(taskId));
+            }
+            const btnQuickNested = document.getElementById('btnQuickNested');
+            if (btnQuickNested) {
+                btnQuickNested.addEventListener('click', () => createNestedAndOpen(taskId));
             }
             bindRelatedSearch();
 
@@ -574,52 +571,14 @@
             }
         }
 
-        async function addChildTask() {
-            const input = document.getElementById('newChildName');
-            const name = (input && input.value.trim()) || '';
-            if (!name) {
-                if (input) input.focus();
-                showToast('Введите название', 'error');
-                return;
-            }
-            try {
-                const created = await CRM.addTask({
-                    project_id: task.project_id || '',
-                    name,
-                    column_status: taskColumns[0]?.name || 'Ожидает',
-                    person: task.person || (API.getCurrentUser() || {}).name || 'Костя',
-                    parent_id: taskId,
-                    priority: 'medium',
-                    date: todayDatetimeLocal(),
-                    date_end: '',
-                    time: '',
-                    done: false,
-                    urgent: false,
-                    hashtags: [],
-                    description: ''
-                });
-                if (created && created.id) touchRecent(created.id);
-                showToast('Связанная задача создана', 'success');
-                await ensureEpicIfManyChildren();
-                render();
-                const next = document.getElementById('newChildName');
-                if (next) { next.value = ''; next.focus(); }
-            } catch (err) {
-                showToast(err.message || 'Ошибка', 'error');
-            }
-        }
-
-        window.addNestedUnder = async function(parentId) {
-            const parent = CRM.getTasks().find(t => t.id === parentId);
-            if (!parent) return;
-            const name = prompt('Название вложенной задачи:', '');
-            if (name === null) return;
-            const trimmed = name.trim();
-            if (!trimmed) { showToast('Введите название', 'error'); return; }
+        async function createNestedAndOpen(parentId, nameOverride) {
+            const parent = CRM.getTasks().find(t => t.id === parentId) || task;
+            if (!parent) return null;
+            const name = (nameOverride && String(nameOverride).trim()) || 'Новая задача';
             try {
                 const created = await CRM.addTask({
                     project_id: parent.project_id || task.project_id || '',
-                    name: trimmed,
+                    name,
                     column_status: parent.column_status || taskColumns[0]?.name || 'Ожидает',
                     person: parent.person || task.person || (API.getCurrentUser() || {}).name || 'Костя',
                     parent_id: parentId,
@@ -632,13 +591,33 @@
                     hashtags: [],
                     description: ''
                 });
-                if (created && created.id) touchRecent(created.id);
+                if (!created || !created.id) throw new Error('Не удалось создать задачу');
+                touchRecent(created.id);
+                if (parentId === taskId) await ensureEpicIfManyChildren();
+                else if (parent && !parent.parent_id) {
+                    try { await CRM.updateTask(parentId, { is_epic: true }); } catch (e) {}
+                }
                 showToast('Вложенная задача создана', 'success');
-                await CRM.load();
-                render();
+                crmGo('/pages/task.html?id=' + encodeURIComponent(created.id), created.name || name);
+                return created;
             } catch (err) {
                 showToast(err.message || 'Ошибка', 'error');
+                return null;
             }
+        }
+
+        async function addChildTask() {
+            const input = document.getElementById('newChildName');
+            const name = (input && input.value.trim()) || '';
+            if (!name) {
+                await createNestedAndOpen(taskId);
+                return;
+            }
+            await createNestedAndOpen(taskId, name);
+        }
+
+        window.addNestedUnder = async function(parentId) {
+            await createNestedAndOpen(parentId);
         };
 
         window.relatedToggleDone = async function(id) {
@@ -905,10 +884,8 @@
             }},
             { keys: 'Ctrl+U', label: 'Срочно', match: (e) => (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u', run: () => patchTask({ urgent: !task.urgent }) },
             { keys: 'Ctrl+Backspace', label: 'Удалить задачу', match: (e) => (e.ctrlKey || e.metaKey) && e.key === 'Backspace', run: () => deleteThisTask() },
-            { keys: 'N', label: 'Новая связанная задача', match: (e) => !e.ctrlKey && !e.metaKey && (e.key === 'n' || e.key === 'N' || e.key === '+'), run: () => {
-                const input = document.getElementById('newChildName');
-                if (input) input.focus();
-                else if (!task.parent_id && !task.is_epic) toggleEpic();
+            { keys: 'N', label: 'Новая вложенная задача', match: (e) => !e.ctrlKey && !e.metaKey && (e.key === 'n' || e.key === 'N' || e.key === '+'), run: () => {
+                createNestedAndOpen(taskId);
             }},
             { keys: 'S', label: 'Статус', match: (e) => !e.ctrlKey && e.key.toLowerCase() === 's', run: () => editField('column_status') },
             { keys: 'P', label: 'Исполнитель', match: (e) => !e.ctrlKey && e.key.toLowerCase() === 'p', run: () => editField('person') },
