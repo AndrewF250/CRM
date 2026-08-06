@@ -14,6 +14,8 @@ const adminvpsOps = require('./adminvps-ops');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
+// Cloudflare / nginx proxies set X-Forwarded-* — needed for https links & cookies
+app.set('trust proxy', 1);
 
 function getAppTimezone() {
   try {
@@ -1244,8 +1246,14 @@ function ensureClientToken(projectId) {
 }
 
 function clientPortalUrl(token, req) {
-  const host = (req && req.get && req.get('x-forwarded-host')) || (req && req.get && req.get('host')) || 'crm-seo-123.xyz';
-  const proto = (req && req.get && req.get('x-forwarded-proto')) || (String(host).includes('localhost') ? 'http' : 'http');
+  const hostHeader = (req && req.get && (req.get('x-forwarded-host') || req.get('host'))) || 'crm-seo-123.xyz';
+  const host = String(hostHeader).split(',')[0].trim().split(':')[0] || 'crm-seo-123.xyz';
+  const xf = (req && req.get && req.get('x-forwarded-proto')) || '';
+  const xfProto = String(xf).split(',')[0].trim().toLowerCase();
+  const isLocal = /^(localhost|127\.0\.0\.1)$/i.test(host);
+  const proto = xfProto === 'https' || xfProto === 'http'
+    ? xfProto
+    : (isLocal ? 'http' : 'https');
   return `${proto}://${host}/pages/client.html?t=${encodeURIComponent(token)}`;
 }
 

@@ -412,18 +412,18 @@ try {
     appDir: '/var/www/crm-app/server',
     backupDir: '/var/www/crm-app/backups',
     auto_connect: false,
-    domain: 'http://crm-seo-123.xyz/',
+    domain: 'https://crm-seo-123.xyz/',
     label: 'Прод-сервер: заливка кода и бэкап БД'
   });
   ensure('domain', 'Домен CRM', {
-    url: 'http://crm-seo-123.xyz/',
+    url: 'https://crm-seo-123.xyz/',
     label: 'Публичный адрес CRM',
     renew_date: '',
     registrar: '',
     note: ''
   });
   ensure('subscription', 'Хостинг / домен (биллинг)', {
-    domain: 'http://crm-seo-123.xyz/',
+    domain: 'https://crm-seo-123.xyz/',
     label: 'Оплата хостинга / VPS',
     provider: 'AdminVPS',
     plan: '',
@@ -436,7 +436,7 @@ try {
   ensure('adminvps', 'AdminVPS (хостинг / DNS)', {
     baseUrl: 'https://my.adminvps.ru',
     zone_id: '64808',
-    domain: 'http://crm-seo-123.xyz/',
+    domain: 'https://crm-seo-123.xyz/',
     label: 'Кабинет AdminVPS · DNSManager',
     panel_url: 'https://my.adminvps.ru/index.php?m=DNSManager2&mg-action=editZone&zone_id=64808'
   });

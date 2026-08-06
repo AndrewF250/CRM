@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дашборд — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=58">
+    <link rel="stylesheet" href="/assets/css/style.css?v=59">
 </head>
 <body>
     <div id="app"></div>
@@ -473,6 +473,31 @@
             else if (w.type === 'finances') renderFinances(body, isPreview);
         }
 
+        function fitStatsScale(root) {
+            if (!root) return;
+            const grid = root.querySelector('.db-stats-inner') || root;
+            const cards = grid.querySelectorAll('.stat-card');
+            if (!cards.length) return;
+            // Reset to CSS fluid scale, then shrink until each card fits its content
+            grid.style.removeProperty('--stat-scale');
+            const base = parseFloat(getComputedStyle(grid).fontSize) || 14;
+            let scalePx = base;
+            const minPx = 7;
+            const overflows = () => Array.from(cards).some(card => {
+                const info = card.querySelector('.stat-info');
+                if (!info) return card.scrollWidth > card.clientWidth + 1 || card.scrollHeight > card.clientHeight + 1;
+                return info.scrollWidth > info.clientWidth + 1
+                    || card.scrollWidth > card.clientWidth + 1
+                    || card.scrollHeight > card.clientHeight + 1;
+            });
+            let guard = 0;
+            while (overflows() && scalePx > minPx && guard < 40) {
+                scalePx -= 0.5;
+                grid.style.setProperty('--stat-scale', scalePx + 'px');
+                guard += 1;
+            }
+        }
+
         async function renderStats(body, isPreview) {
             try {
                 const stats = await API.getStats();
@@ -483,6 +508,16 @@
                     <div class="stat-card"><div class="stat-icon green"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div><div class="stat-info"><div class="stat-label">Оплата</div><div class="stat-value">${formatAmount(stats.pendingPayments || 0)}</div></div></div>
                     <div class="stat-card"><div class="stat-icon purple"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="stat-info"><div class="stat-label">Клиенты</div><div class="stat-value">${stats.totalClients || 0}</div></div></div>
                 </div>`;
+                requestAnimationFrame(() => fitStatsScale(body));
+                if (!body._statsFitObs) {
+                    body._statsFitObs = new ResizeObserver(() => {
+                        clearTimeout(body._statsFitTimer);
+                        body._statsFitTimer = setTimeout(() => fitStatsScale(body), 40);
+                    });
+                    body._statsFitObs.observe(body);
+                    const widget = body.closest('.db-widget');
+                    if (widget) body._statsFitObs.observe(widget);
+                }
             } catch (e) {
                 body.innerHTML = '<p class="text-muted">Не удалось загрузить</p>';
             }
