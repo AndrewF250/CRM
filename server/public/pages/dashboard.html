@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дашборд — CRM System</title>
-    <link rel="stylesheet" href="/assets/css/style.css?v=59">
+    <link rel="stylesheet" href="/assets/css/style.css?v=60">
 </head>
 <body>
     <div id="app"></div>
@@ -482,7 +482,7 @@
             grid.style.removeProperty('--stat-scale');
             const base = parseFloat(getComputedStyle(grid).fontSize) || 14;
             let scalePx = base;
-            const minPx = 7;
+            const minPx = 13;
             const overflows = () => Array.from(cards).some(card => {
                 const info = card.querySelector('.stat-info');
                 if (!info) return card.scrollWidth > card.clientWidth + 1 || card.scrollHeight > card.clientHeight + 1;

@@ -915,14 +915,14 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
     min-height: 0;
 }
 .db-widget .db-stats-inner {
-    --stat-scale: clamp(0.55rem, 3.8cqmin, 1rem);
+    --stat-scale: clamp(0.95rem, 6.2cqmin, 1.45rem);
     margin-bottom: 0;
     flex: 1;
     min-height: 0;
     width: 100%;
     height: 100%;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: calc(var(--stat-scale) * 0.55);
+    gap: calc(var(--stat-scale) * 0.5);
     align-content: stretch;
     font-size: var(--stat-scale);
 }
@@ -932,19 +932,19 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
     height: 100%;
     overflow: hidden;
     align-items: center;
-    padding: calc(var(--stat-scale) * 0.7) calc(var(--stat-scale) * 0.85);
-    gap: calc(var(--stat-scale) * 0.65);
-    border-radius: calc(var(--stat-scale) * 0.7);
+    padding: calc(var(--stat-scale) * 0.55) calc(var(--stat-scale) * 0.7);
+    gap: calc(var(--stat-scale) * 0.55);
+    border-radius: calc(var(--stat-scale) * 0.55);
 }
 .db-widget .db-stats-inner .stat-icon {
-    width: calc(var(--stat-scale) * 2.4);
-    height: calc(var(--stat-scale) * 2.4);
-    border-radius: calc(var(--stat-scale) * 0.55);
+    width: calc(var(--stat-scale) * 2.15);
+    height: calc(var(--stat-scale) * 2.15);
+    border-radius: calc(var(--stat-scale) * 0.5);
     flex-shrink: 0;
 }
 .db-widget .db-stats-inner .stat-icon svg {
-    width: 52%;
-    height: 52%;
+    width: 54%;
+    height: 54%;
     display: block;
 }
 .db-widget .db-stats-inner .stat-info {
@@ -953,23 +953,23 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
     overflow: hidden;
 }
 .db-widget .db-stats-inner .stat-label {
-    font-size: 0.72em;
+    font-size: 0.78em;
     line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     letter-spacing: 0.03em;
 }
 .db-widget .db-stats-inner .stat-value {
-    font-size: 1.45em;
+    font-size: 1.55em;
     line-height: 1.15;
-    margin-top: 0.08em;
+    margin-top: 0.06em;
     white-space: nowrap;
     overflow: hidden;
 }
-@container dbstats (max-width: 420px) {
+@container dbstats (max-width: 560px) {
     .db-stats-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@container dbstats (max-width: 200px) {
+@container dbstats (max-width: 280px) {
     .db-stats-inner { grid-template-columns: 1fr; }
 }
 .db-edit .db-widget {
